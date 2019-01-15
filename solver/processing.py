@@ -1,72 +1,62 @@
-import itertools
+import asyncio
 import logging
-import time
 import typing as t
+from concurrent import futures
 
-from geoindex import GeoGridIndex, GeoPoint
-from geoindex.geo_grid_index import GEO_HASH_GRID_SIZE
+import psutil
 
 from solver import data, util
 
-
 logger = logging.getLogger(__name__)
 
-MIN_GRID_SIZE = 1
-MIN_RESULT_COUNT = 2
 
+class Processor:
+    _executor: futures.ThreadPoolExecutor
+    _loop: asyncio.events.AbstractEventLoop
+    data_set: data.DataSet
 
-def group_points(points: t.List[data.Point]) -> t.List[GeoPoint]:
-    return [GeoPoint(lat, lon, ref=list(g))
-            for (lat, lon), g in
-            itertools.groupby(sorted(points, key=lambda p: p.grid),
-                              lambda p: p.grid)]
+    def __init__(self, data_set: data.DataSet):
+        self._executor = futures.ThreadPoolExecutor(
+            max_workers=psutil.cpu_count(),
+            thread_name_prefix="p_"
+        )
+        self._loop = asyncio.get_event_loop()
+        self.data_set = data_set
 
+    @classmethod
+    def create(cls, file_path: str) -> 'Processor':
+        return cls(data.DataSet(file_path))
 
-class Grid:
-    points: t.List[GeoPoint]
-    precision: int
-    index: GeoGridIndex
+    def _wait(self, awaitable):
+        self._loop.run_until_complete(awaitable)
 
-    def __init__(self, points: t.List[GeoPoint], precision: int = 5):
-        self.points = points
-        self._set_precision(precision)
+    async def execute(self, func: (), *args):
+        return await asyncio.wait(
+            [self._loop.run_in_executor(self._executor, func, *args)])
 
-    def _set_precision(self, precision):
-        self.precision = precision
-        if self.precision not in GEO_HASH_GRID_SIZE:
-            self.precision = MIN_GRID_SIZE
-        self.index = GeoGridIndex(precision=self.precision)
-        for p in self.points:
-            self.index.add_point(p)
+    async def execute_many(self, func: (), args_list: t.Iterable[t.Any]):
+        tasks = [self._loop.run_in_executor(self._executor, func, *args)
+                 for args in args_list]
+        return await asyncio.wait(tasks)
 
-    def _get_radius(self) -> float:
-        return GEO_HASH_GRID_SIZE[self.precision] / 2.0
+    @staticmethod
+    def _find_grid_neighbors(grid: data.Grid):
+        if len(grid.points) > 1:
+            return
+        for point in grid.points:
+            grid.get_nearest_points(point)
 
-    def get_nearest_points(self, p: GeoPoint,
-                           resize: bool = True
-                           ) -> t.List[t.Tuple[GeoPoint, float]]:
-        while True:
-            nearest = sorted(
-                filter(lambda n: n[1] > 0.0,
-                       self.index.get_nearest_points(p, self._get_radius())),
-                key=lambda n: n[1])
-            if not resize:
-                return nearest
-            elif len(nearest) >= MIN_RESULT_COUNT or \
-                    self.precision == MIN_GRID_SIZE:
-                return nearest
-            else:
-                self._set_precision(self.precision - 1)
-
-
-def load_grid(target_path: str) -> Grid:
-    return Grid(group_points(data.DataSet(target_path).points))
+    @util.timeit
+    def find_grid_neighbors(self):
+        self._wait(self.execute_many(self._find_grid_neighbors,
+                                     [[g] for g in self.data_set.grids]))
 
 
 if __name__ == "__main__":
-    file_name = util.get_relative_path(__file__, "../data/ar9152.tsp")
-    start = time.time()
-    grid = load_grid(file_name)
-    ns = grid.get_nearest_points(grid.points[0])
-    logging.info("Elapsed time: %f sec", time.time() - start)
+    target_path = util.get_relative_path(__file__, "../data/world.tsp")
+    logger.info("Loading %s", target_path)
+    processor = Processor.create(target_path)
+    logger.info("Loaded %s points", len(processor.data_set.points))
+    logger.info("Generated %s grids", len(processor.data_set.grids))
+    processor.find_grid_neighbors()
     input("")
