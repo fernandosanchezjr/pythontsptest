@@ -16,9 +16,8 @@ class Processor:
     data_set: data.DataSet
 
     def __init__(self, data_set: data.DataSet):
-        self._executor = futures.ThreadPoolExecutor(
-            max_workers=psutil.cpu_count(),
-            thread_name_prefix="p_"
+        self._executor = futures.ProcessPoolExecutor(
+            max_workers=psutil.cpu_count() - 1
         )
         self._loop = asyncio.get_event_loop()
         self.data_set = data_set
@@ -41,15 +40,17 @@ class Processor:
 
     @staticmethod
     def _find_grid_neighbors(grid: data.Grid):
-        if len(grid.points) > 1:
+        if len(grid.points) <= 1:
             return
         for point in grid.points:
-            grid.get_nearest_points(point)
+            nearest = grid.get_nearest_points(point)
+            # logger.info("Nearest to %s in %s: %s", point, grid, nearest)
+        logger.info("Grid %s processed", grid)
 
     @util.timeit
     def find_grid_neighbors(self):
         self._wait(self.execute_many(self._find_grid_neighbors,
-                                     [[g] for g in self.data_set.grids]))
+                                     ([g] for g in self.data_set.grids)))
 
 
 if __name__ == "__main__":
