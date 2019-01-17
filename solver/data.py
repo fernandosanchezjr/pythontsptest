@@ -7,6 +7,7 @@ from os import path
 import math
 from geoindex import GeoGridIndex, GeoPoint
 from geoindex.geo_grid_index import GEO_HASH_GRID_SIZE
+from mpl_toolkits.basemap import Basemap
 
 from solver import constants, util
 
@@ -30,6 +31,15 @@ def _euc_2d_parser(coord: str) -> float:
     return float(coord) * -0.001
 
 
+def map_coords(
+    projection: Basemap,
+    latitude: float,
+    longitude: float
+) -> Coords:
+    return projection((longitude if longitude >= 0 else 360.0 + longitude),
+                      latitude)
+
+
 class IndexEntry(GeoPoint):
     numbers = util.Numbers()
     id_: int
@@ -50,15 +60,14 @@ class IndexEntry(GeoPoint):
 
     __str__ = __repr__
 
-    def to_map_coords(self) -> Coords:
-        return (self.longitude
-                if self.longitude >= 0
-                else 360.0 + self.longitude), self.latitude
+    def map_coords(self, projection: Basemap) -> Coords:
+        return map_coords(projection, self.latitude, self.longitude)
+
+
+Distance = t.Tuple[IndexEntry, float]
 
 
 class Point(IndexEntry):
-    Distance = t.Tuple['Point', float]
-
     duplicates: t.List['Point']
     grid: Coords
 
@@ -78,7 +87,7 @@ class Point(IndexEntry):
 
 
 class Grid(IndexEntry):
-    points: t.List[Point]
+    contents: t.List[IndexEntry]
     precision: int
     index: GeoGridIndex
 
@@ -86,12 +95,11 @@ class Grid(IndexEntry):
         self,
         latitude: float,
         longitude: float,
-        points: t.List[Point],
+        contents: t.List[IndexEntry],
         precision: int = constants.DEFAULT_PRECISION
     ):
-        id_ = self.numbers.next()
-        self.points = points
-        super().__init__(id_, latitude, longitude)
+        self.contents = contents
+        super().__init__(self.numbers.next(), latitude, longitude)
         self.precision = precision
         self._set_precision(precision)
 
@@ -103,7 +111,7 @@ class Grid(IndexEntry):
         else:
             self.precision = precision
         self.index = GeoGridIndex(precision=self.precision)
-        for p in self.points:
+        for p in self.contents:
             self.index.add_point(p)
 
     def _radius(self) -> float:
@@ -160,7 +168,7 @@ class DataSet:
     def _read_points(
         fh: t.TextIO,
         edge_weight_type: EdgeWeightType
-    ) -> t.List[Point]:
+    ) -> t.List[Distance]:
         coord_parser = float
         if edge_weight_type == EdgeWeightType.EUC_2D:
             coord_parser = _euc_2d_parser

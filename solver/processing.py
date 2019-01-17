@@ -7,6 +7,7 @@ import psutil
 
 from solver import data, util, graph
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,9 +42,9 @@ class Processor:
 
     @staticmethod
     def _find_grid_neighbors(grid: data.Grid):
-        if len(grid.points) <= 1:
+        if len(grid.contents) <= 1:
             return grid
-        for point in grid.points:
+        for point in grid.contents:
             nearest = grid.get_nearest_points(point)
             # logger.info("Nearest to %s in %s: %s", point, grid, nearest)
         logger.info("%s processed", grid)
@@ -67,7 +68,7 @@ class Processor:
     def points_graph(self) -> graph.Map:
         m = graph.Map("Points")
         for grid in self.data_set.grids:
-            m.add_entries(grid.points)
+            m.add_entries(grid.contents)
         m.save("points.png")
         return m
 
@@ -84,4 +85,3 @@ if __name__ == "__main__":
     processor.grid_graph().draw()
     processor.points_graph()
     processor.show()
-    input("")

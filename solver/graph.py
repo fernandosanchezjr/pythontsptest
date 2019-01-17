@@ -12,8 +12,6 @@ class Map:
 
     def __init__(self, title=""):
         self.fig = plt.figure(title or self.numbers.next())
-        manager = plt.get_current_fig_manager()
-        manager.window.showMaximized()
         # miller projection
         self.world_map = Basemap(projection='mill', lon_0=180)
         # plot coastlines, draw label meridians and parallels.
@@ -31,8 +29,7 @@ class Map:
 
     def add_entries(self, entries: t.List[data.IndexEntry]):
         plt.figure(self.fig.number)
-        coords = np.array([self.world_map(*p.to_map_coords())
-                           for p in entries])
+        coords = np.array([p.map_coords(self.world_map) for p in entries])
         x, y = coords.T
         plt.plot(x, y, 'ok', markersize=2, color='red')
 
