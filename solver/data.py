@@ -24,20 +24,15 @@ Coords = t.Tuple[float, float]
 
 
 def _grid_coordinates(lat: float, lon: float) -> Coords:
-    return math.trunc(lat) + 0.5, math.trunc(lon) + 0.5
+    return math.trunc(lat), math.trunc(lon)
 
 
 def _euc_2d_parser(coord: str) -> float:
     return float(coord) * -0.001
 
 
-def map_coords(
-    projection: Basemap,
-    latitude: float,
-    longitude: float
-) -> Coords:
-    return projection((longitude if longitude >= 0 else 360.0 + longitude),
-                      latitude)
+def xy(latitude: float, longitude: float) -> Coords:
+    return (longitude if longitude >= 0 else 360.0 + longitude), latitude
 
 
 class IndexEntry(GeoPoint):
@@ -61,10 +56,11 @@ class IndexEntry(GeoPoint):
     __str__ = __repr__
 
     def map_coords(self, projection: Basemap) -> Coords:
-        return map_coords(projection, self.latitude, self.longitude)
+        return projection(*xy(self.latitude, self.longitude))
 
 
 Distance = t.Tuple[IndexEntry, float]
+Line = t.Tuple[float, float, float, float]
 
 
 class Point(IndexEntry):
@@ -120,7 +116,7 @@ class Grid(IndexEntry):
     def get_nearest_points(
         self, target: GeoPoint,
         resize: bool = True
-    ) -> t.List[GeoPoint]:
+    ) -> t.List[Distance]:
         while True:
             points = sorted(
                 filter(lambda n: n[1] > 0.0,
@@ -133,6 +129,25 @@ class Grid(IndexEntry):
                 return points
             else:
                 self._set_precision(self.precision - 1)
+
+    def map_coords(self, projection: Basemap) -> Coords:
+        return projection(*xy(self.latitude - 0.5, self.longitude - 0.5))
+
+    def bounds(
+        self,
+        projection: Basemap
+    ) -> t.List[Coords]:
+        latitude1 = self.latitude
+        longitude1 = self.longitude
+        latitude2 = self.latitude - 1.0
+        longitude2 = self.longitude - 1.0
+        x1, y1 = projection(*xy(latitude1, longitude1))
+        x2, y2 = projection(*xy(latitude2, longitude2))
+        return [(x1, y1),
+                (x2, y1),
+                (x2, y2),
+                (x1, y2),
+                (x1, y1)]
 
 
 class DataSet:

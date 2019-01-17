@@ -58,18 +58,13 @@ class Processor:
         self.data_set.grids = result_grids
 
     @util.timeit
-    def grid_graph(self) -> graph.Map:
-        m = graph.Map("Grids")
-        m.add_entries(self.data_set.grids)
-        m.save("grids.png")
-        return m
-
-    @util.timeit
-    def points_graph(self) -> graph.Map:
-        m = graph.Map("Points")
+    def map(self) -> graph.Map:
+        m = graph.Map(f"{self.data_set.name} map")
+        m.add_grids(self.data_set.grids)
+        m.add_points(self.data_set.grids, color='yellow', markersize=2)
         for grid in self.data_set.grids:
-            m.add_entries(grid.contents)
-        m.save("points.png")
+            m.add_points(grid.contents)
+        m.save(f"{self.data_set.name}_map.png")
         return m
 
     @staticmethod
@@ -78,10 +73,9 @@ class Processor:
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
+    target_path = util.get_relative_path(__file__, "../data/world_part.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     # processor.find_grid_neighbors()
-    processor.grid_graph().draw()
-    processor.points_graph()
+    processor.map()
     processor.show()
