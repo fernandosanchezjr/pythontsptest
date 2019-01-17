@@ -1,18 +1,14 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Nov 20 21:03:17 2018
-
-@author: fernando
-"""
 import enum
+import itertools
 import logging
-import math
-import time
 import typing as t
+from os import path
 
-from geoindex import GeoPoint
+import math
+from geoindex import GeoGridIndex, GeoPoint
+from geoindex.geo_grid_index import GEO_HASH_GRID_SIZE
 
-from solver import util
+from solver import constants, util
 
 logger = logging.getLogger(__name__)
 COORD_DELIMITER = "NODE_COORD_SECTION"
@@ -23,7 +19,10 @@ class EdgeWeightType(str, enum.Enum):
     GEOM = "GEOM"
 
 
-def _grid_coordinates(lat: float, lon: float) -> t.Tuple[float, float]:
+Coords = t.Tuple[float, float]
+
+
+def _grid_coordinates(lat: float, lon: float) -> Coords:
     return math.trunc(lat) + 0.5, math.trunc(lon) + 0.5
 
 
@@ -31,61 +30,161 @@ def _euc_2d_parser(coord: str) -> float:
     return float(coord) * -0.001
 
 
-class Point(GeoPoint):
+class IndexEntry(GeoPoint):
+    numbers = util.Numbers()
     id_: int
-    grid: t.Tuple[int, int]
 
-    def __init__(self, id_, latitude, longitude):
+    def __init__(self, id_: int, latitude: float, longitude: float):
         self.id_ = id_
-        self.grid = _grid_coordinates(longitude, latitude)
         super().__init__(latitude, longitude)
+
+    def __hash__(self) -> int:
+        return self.id_
+
+    def __repr__(self):
+        """
+        Machine representation of Grid instance.
+        """
+        return f'{self.__class__.__name__} #{self.id_}({self.latitude}, ' \
+            f'{self.longitude})'
+
+    __str__ = __repr__
+
+    def to_map_coords(self) -> Coords:
+        return (self.longitude
+                if self.longitude >= 0
+                else 360.0 + self.longitude), self.latitude
+
+
+class Point(IndexEntry):
+    Distance = t.Tuple['Point', float]
+
+    duplicates: t.List['Point']
+    grid: Coords
+
+    def __init__(self, id_: int, latitude: float, longitude: float):
+        self.grid = _grid_coordinates(latitude, longitude)
+        self.duplicates = []
+        super().__init__(id_, latitude, longitude)
+
+    @property
+    def coords(self) -> Coords:
+        return self.longitude, self.latitude
+
+    def merge_duplicates(self, duplicates: t.List['Point']) -> 'Point':
+        if duplicates:
+            self.duplicates.extend(duplicates)
+        return self
+
+
+class Grid(IndexEntry):
+    points: t.List[Point]
+    precision: int
+    index: GeoGridIndex
+
+    def __init__(
+        self,
+        latitude: float,
+        longitude: float,
+        points: t.List[Point],
+        precision: int = constants.DEFAULT_PRECISION
+    ):
+        id_ = self.numbers.next()
+        self.points = points
+        super().__init__(id_, latitude, longitude)
+        self.precision = precision
+        self._set_precision(precision)
+
+    def _set_precision(self, precision):
+        if self.precision == constants.MIN_PRECISION:
+            return
+        if precision not in GEO_HASH_GRID_SIZE:
+            self.precision = constants.MIN_PRECISION
+        else:
+            self.precision = precision
+        self.index = GeoGridIndex(precision=self.precision)
+        for p in self.points:
+            self.index.add_point(p)
+
+    def _radius(self) -> float:
+        return GEO_HASH_GRID_SIZE[self.precision] / 2.0
+
+    def get_nearest_points(
+        self, target: GeoPoint,
+        resize: bool = True
+    ) -> t.List[GeoPoint]:
+        while True:
+            points = sorted(
+                filter(lambda n: n[1] > 0.0,
+                       self.index.get_nearest_points(target, self._radius())),
+                key=lambda n: n[1])
+            if not resize:
+                return points
+            elif (len(points) >= constants.MIN_RESULT_COUNT or
+                  self.precision == constants.MIN_PRECISION):
+                return points
+            else:
+                self._set_precision(self.precision - 1)
 
 
 class DataSet:
     name: str
     edge_weight_type: EdgeWeightType
     points: t.List[Point]
+    grids: t.List[Grid]
+    file_name: str
 
+    @util.timeit
     def __init__(self, path_name):
         with open(path_name) as fh:
+            self.file_name = path.basename(path_name)
             meta_data = self._read_metadata(fh)
             self.name = meta_data.get("name")
             self.edge_weight_type = meta_data.get("edge_weight_type")
             self.points = self._read_points(fh, self.edge_weight_type)
+            self.grids = self._generate_grids()
+        logger.info("Loaded %s points", len(self.points))
+        logger.info("Generated %s grids", len(self.grids))
 
     @staticmethod
     def _read_metadata(fh: t.TextIO) -> t.Mapping[str, str]:
         meta_data = {}
         for line in fh:
-            current_line = line.strip()
-            if current_line == COORD_DELIMITER:
+            if COORD_DELIMITER in line:
                 break
-            field, value = current_line.split(" : ")
+            field, value = line.strip().split(" : ")
             meta_data[field.lower()] = value
         return meta_data
 
     @staticmethod
-    def _read_points(fh: t.TextIO,
-                     edge_weight_type: EdgeWeightType) -> t.List[Point]:
-        points = []
+    def _read_points(
+        fh: t.TextIO,
+        edge_weight_type: EdgeWeightType
+    ) -> t.List[Point]:
         coord_parser = float
         if edge_weight_type == EdgeWeightType.EUC_2D:
             coord_parser = _euc_2d_parser
+        coordinates: t.Dict[Coords, t.List[Point]] = {}
         for line in fh:
             try:
-                id_, lon, lat = line.strip().split(" ")
-                lat, lon = coord_parser(lat), coord_parser(lon)
-                points.append(Point(int(id_), lat, lon))
+                id_, lat, lon = line.strip().split(" ")
+                point = Point(int(id_), coord_parser(lat), coord_parser(lon))
+                points = coordinates.setdefault(point.coords, [])
+                points.append(point)
             except ValueError:
                 pass
-        return points
+        return [first.merge_duplicates(rest)
+                for first, *rest in coordinates.values()]
+
+    def _generate_grids(self) -> t.List[Grid]:
+        return [Grid(lat, lon, list(points))
+                for (lat, lon), points in
+                itertools.groupby(sorted(self.points, key=lambda p: p.grid),
+                                  key=lambda p: p.grid)]
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/world.tsp")
+    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
     logger.info("Loading %s", target_path)
-    start = time.time()
     data_set = DataSet(target_path)
-    logging.info("Elapsed time: %f sec", time.time() - start)
-    logger.info("loaded %s points", len(data_set.points))
     input("")

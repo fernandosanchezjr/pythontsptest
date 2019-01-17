@@ -1,11 +1,6 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Nov 20 21:18:21 2018
-
-@author: fernando
-"""
 import logging
 from os import path
+import time
 
 
 def setup_logging():
@@ -14,8 +9,37 @@ def setup_logging():
     root.addHandler(logging.StreamHandler())
 
 
-def get_relative_path(module: str, path_name: str) -> str:
-    return path.abspath(path.join(path.dirname(__file__), path_name))
-
-
 setup_logging()
+logger = logging.getLogger(__name__)
+
+
+def get_relative_path(module: str, path_name: str) -> str:
+    return path.abspath(path.join(path.dirname(module), path_name))
+
+
+def timeit(method):
+    def timed(*args, **kw):
+        ts = time.time()
+        result = method(*args, **kw)
+        te = time.time()
+        logging.debug("%s elapsed time: %f ms",
+                      method.__qualname__, (te - ts) * 1000)
+        return result
+    return timed
+
+
+class Numbers:
+    current: int
+
+    def __init__(self):
+        self.current = 0
+
+    def __iter__(self) -> 'Numbers':
+        return self
+
+    def __next__(self) -> int:
+        self.current += 1
+        return self.current
+
+    def next(self) -> int:
+        return next(self)
