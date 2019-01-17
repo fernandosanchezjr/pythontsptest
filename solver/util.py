@@ -10,8 +10,6 @@ def setup_logging():
 
 
 setup_logging()
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -28,3 +26,20 @@ def timeit(method):
                       method.__qualname__, (te - ts) * 1000)
         return result
     return timed
+
+
+class Numbers:
+    current: int
+
+    def __init__(self):
+        self.current = 0
+
+    def __iter__(self) -> 'Numbers':
+        return self
+
+    def __next__(self) -> int:
+        self.current += 1
+        return self.current
+
+    def next(self) -> int:
+        return next(self)
