@@ -1,10 +1,10 @@
 import enum
 import itertools
 import logging
+import math
 import typing as t
 from os import path
 
-import math
 from geoindex import GeoGridIndex, GeoPoint
 from geoindex.geo_grid_index import GEO_HASH_GRID_SIZE
 
@@ -23,11 +23,16 @@ Coords = t.Tuple[float, float]
 
 
 def _grid_coordinates(lat: float, lon: float) -> Coords:
-    return math.trunc(lat) + 0.5, math.trunc(lon) + 0.5
+    return (math.trunc(lat) + (-0.5 if lat < 0.0 else 0.5),
+            math.trunc(lon) + (-0.5 if lon < 0.0 else 0.5))
 
 
 def _euc_2d_parser(coord: str) -> float:
     return float(coord) * -0.001
+
+
+def xy(latitude: float, longitude: float) -> Coords:
+    return longitude, latitude
 
 
 class IndexEntry(GeoPoint):
@@ -50,15 +55,15 @@ class IndexEntry(GeoPoint):
 
     __str__ = __repr__
 
-    def to_map_coords(self) -> Coords:
-        return (self.longitude
-                if self.longitude >= 0
-                else 360.0 + self.longitude), self.latitude
+    def map_coords(self) -> Coords:
+        return xy(self.latitude, self.longitude)
+
+
+Distance = t.Tuple[IndexEntry, float]
+Line = t.Tuple[float, float, float, float]
 
 
 class Point(IndexEntry):
-    Distance = t.Tuple['Point', float]
-
     duplicates: t.List['Point']
     grid: Coords
 
@@ -78,7 +83,7 @@ class Point(IndexEntry):
 
 
 class Grid(IndexEntry):
-    points: t.List[Point]
+    contents: t.List[IndexEntry]
     precision: int
     index: GeoGridIndex
 
@@ -86,12 +91,11 @@ class Grid(IndexEntry):
         self,
         latitude: float,
         longitude: float,
-        points: t.List[Point],
+        contents: t.List[IndexEntry],
         precision: int = constants.DEFAULT_PRECISION
     ):
-        id_ = self.numbers.next()
-        self.points = points
-        super().__init__(id_, latitude, longitude)
+        self.contents = contents
+        super().__init__(self.numbers.next(), latitude, longitude)
         self.precision = precision
         self._set_precision(precision)
 
@@ -103,7 +107,7 @@ class Grid(IndexEntry):
         else:
             self.precision = precision
         self.index = GeoGridIndex(precision=self.precision)
-        for p in self.points:
+        for p in self.contents:
             self.index.add_point(p)
 
     def _radius(self) -> float:
@@ -112,7 +116,7 @@ class Grid(IndexEntry):
     def get_nearest_points(
         self, target: GeoPoint,
         resize: bool = True
-    ) -> t.List[GeoPoint]:
+    ) -> t.List[Distance]:
         while True:
             points = sorted(
                 filter(lambda n: n[1] > 0.0,
@@ -125,6 +129,23 @@ class Grid(IndexEntry):
                 return points
             else:
                 self._set_precision(self.precision - 1)
+
+    def map_coords(self) -> Coords:
+        return xy(self.latitude, self.longitude)
+
+    def bounds(
+        self,
+    ) -> t.List[Coords]:
+        center_x, center_y = self.map_coords()
+        x1, y1 = center_x - 0.5, center_y + 0.5
+        x2, y2 = center_x + 0.5, center_y - 0.5
+        if x1 < 0.0 and x2 == 0.0:
+            x2 = 359.999999
+        return [(x1, y1),
+                (x2, y1),
+                (x2, y2),
+                (x1, y2),
+                (x1, y1)]
 
 
 class DataSet:
@@ -160,7 +181,7 @@ class DataSet:
     def _read_points(
         fh: t.TextIO,
         edge_weight_type: EdgeWeightType
-    ) -> t.List[Point]:
+    ) -> t.List[Distance]:
         coord_parser = float
         if edge_weight_type == EdgeWeightType.EUC_2D:
             coord_parser = _euc_2d_parser

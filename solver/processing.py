@@ -7,6 +7,7 @@ import psutil
 
 from solver import data, util, graph
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -41,9 +42,9 @@ class Processor:
 
     @staticmethod
     def _find_grid_neighbors(grid: data.Grid):
-        if len(grid.points) <= 1:
+        if len(grid.contents) <= 1:
             return grid
-        for point in grid.points:
+        for point in grid.contents:
             nearest = grid.get_nearest_points(point)
             # logger.info("Nearest to %s in %s: %s", point, grid, nearest)
         logger.info("%s processed", grid)
@@ -57,18 +58,13 @@ class Processor:
         self.data_set.grids = result_grids
 
     @util.timeit
-    def grid_graph(self) -> graph.Map:
-        m = graph.Map("Grids")
-        m.add_entries(self.data_set.grids)
-        m.save("grids.png")
-        return m
-
-    @util.timeit
-    def points_graph(self) -> graph.Map:
-        m = graph.Map("Points")
+    def draw_map(self) -> graph.Map:
+        m = graph.Map(f"{self.data_set.name} map")
+        m.add_grids(self.data_set.grids)
+        m.add_points(self.data_set.grids, color='yellow', markersize=2)
         for grid in self.data_set.grids:
-            m.add_entries(grid.points)
-        m.save("points.png")
+            m.add_points(grid.contents)
+        m.save(f"{self.data_set.name}_map.png")
         return m
 
     @staticmethod
@@ -77,11 +73,9 @@ class Processor:
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
+    target_path = util.get_relative_path(__file__, "../data/world.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     # processor.find_grid_neighbors()
-    processor.grid_graph().draw()
-    processor.points_graph()
+    processor.draw_map()
     processor.show()
-    input("")
