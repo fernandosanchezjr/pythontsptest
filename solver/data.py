@@ -1,13 +1,12 @@
 import enum
 import itertools
 import logging
+import math
 import typing as t
 from os import path
 
-import math
 from geoindex import GeoGridIndex, GeoPoint
 from geoindex.geo_grid_index import GEO_HASH_GRID_SIZE
-from mpl_toolkits.basemap import Basemap
 
 from solver import constants, util
 
@@ -24,7 +23,8 @@ Coords = t.Tuple[float, float]
 
 
 def _grid_coordinates(lat: float, lon: float) -> Coords:
-    return math.trunc(lat), math.trunc(lon)
+    return (math.trunc(lat) + (-0.5 if lat < 0.0 else 0.5),
+            math.trunc(lon) + (-0.5 if lon < 0.0 else 0.5))
 
 
 def _euc_2d_parser(coord: str) -> float:
@@ -32,7 +32,7 @@ def _euc_2d_parser(coord: str) -> float:
 
 
 def xy(latitude: float, longitude: float) -> Coords:
-    return (longitude if longitude >= 0 else 360.0 + longitude), latitude
+    return longitude, latitude
 
 
 class IndexEntry(GeoPoint):
@@ -55,8 +55,8 @@ class IndexEntry(GeoPoint):
 
     __str__ = __repr__
 
-    def map_coords(self, projection: Basemap) -> Coords:
-        return projection(*xy(self.latitude, self.longitude))
+    def map_coords(self) -> Coords:
+        return xy(self.latitude, self.longitude)
 
 
 Distance = t.Tuple[IndexEntry, float]
@@ -130,19 +130,17 @@ class Grid(IndexEntry):
             else:
                 self._set_precision(self.precision - 1)
 
-    def map_coords(self, projection: Basemap) -> Coords:
-        return projection(*xy(self.latitude - 0.5, self.longitude - 0.5))
+    def map_coords(self) -> Coords:
+        return xy(self.latitude, self.longitude)
 
     def bounds(
         self,
-        projection: Basemap
     ) -> t.List[Coords]:
-        latitude1 = self.latitude
-        longitude1 = self.longitude
-        latitude2 = self.latitude - 1.0
-        longitude2 = self.longitude - 1.0
-        x1, y1 = projection(*xy(latitude1, longitude1))
-        x2, y2 = projection(*xy(latitude2, longitude2))
+        center_x, center_y = self.map_coords()
+        x1, y1 = center_x - 0.5, center_y + 0.5
+        x2, y2 = center_x + 0.5, center_y - 0.5
+        if x1 < 0.0 and x2 == 0.0:
+            x2 = 359.999999
         return [(x1, y1),
                 (x2, y1),
                 (x2, y2),

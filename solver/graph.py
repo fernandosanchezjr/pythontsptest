@@ -7,7 +7,6 @@ from mpl_toolkits.basemap import Basemap
 
 from solver import data, util
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -31,19 +30,24 @@ class Map:
         if title:
             plt.title(title)
 
+    def to_xy(self, entries: t.List[t.Any]) -> t.Tuple[t.Any, t.Any]:
+        bounds = np.array(entries)
+        x, y = bounds.T
+        return self.world_map(np.mod(x, 360.0), y)
+
     def add_points(self, points: t.List[data.IndexEntry], color='black',
                    markersize=0.8):
-        plt.figure(self.fig.number)
-        coords = np.array([p.map_coords(self.world_map) for p in points])
-        x, y = coords.T
-        plt.plot(x, y, 'ok', markersize=markersize, color=color)
+        if points:
+            plt.figure(self.fig.number)
+            x, y = self.to_xy([p.map_coords() for p in points])
+            plt.plot(x, y, 'ok', markersize=markersize, color=color)
 
     def add_grids(self, grids: t.List[data.Grid]):
-        plt.figure(self.fig.number)
-        for grid in grids:
-            bounds = np.array(grid.bounds(self.world_map))
-            x, y = bounds.T
-            plt.plot(x, y, color='blue', linestyle='-', linewidth=1.0)
+        if grids:
+            plt.figure(self.fig.number)
+            for grid in grids:
+                x, y = self.to_xy(grid.bounds())
+                plt.plot(x, y, color='blue', linestyle='-', linewidth=1.0)
 
     def save(self, file_name="graph.png"):
         plt.figure(self.fig.number)

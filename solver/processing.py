@@ -58,7 +58,7 @@ class Processor:
         self.data_set.grids = result_grids
 
     @util.timeit
-    def map(self) -> graph.Map:
+    def draw_map(self) -> graph.Map:
         m = graph.Map(f"{self.data_set.name} map")
         m.add_grids(self.data_set.grids)
         m.add_points(self.data_set.grids, color='yellow', markersize=2)
@@ -73,9 +73,9 @@ class Processor:
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/world_part.tsp")
+    target_path = util.get_relative_path(__file__, "../data/world.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     # processor.find_grid_neighbors()
-    processor.map()
+    processor.draw_map()
     processor.show()
