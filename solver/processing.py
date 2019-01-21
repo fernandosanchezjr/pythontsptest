@@ -2,7 +2,9 @@ import asyncio
 import logging
 import typing as t
 from concurrent import futures
+from operator import attrgetter
 
+import numpy as np
 import psutil
 
 from solver import constants, data, graph, util
@@ -76,8 +78,9 @@ class Processor:
     def find_subdivided_neighbors(self):
         if self.index is None:
             return
-        # for grid in self.data_set.grids:
-        #     print(grid)
+        grids = [[g, list(filter(attrgetter('seed'), g.get_terminals()))]
+                 for g in self.data_set.grids]
+        print(list(grids))
 
     @util.timeit
     def draw_map(
@@ -86,7 +89,7 @@ class Processor:
         b: t.Optional[data.IndexEntry] = None
     ) -> graph.Map:
         m = graph.Map(f"{self.data_set.name} map")
-        grids = self.data_set.grids
+        all_grids = self.data_set.grids
         if a or b:
 
             def _grid_filter(fg: data.Grid) -> bool:
@@ -96,9 +99,21 @@ class Processor:
                     return False
                 return True
 
-            grids = filter(_grid_filter, self.data_set.grids)
-        for grid in grids:
-            m.draw_data(*m.generate_data(grid))
+            all_grids = filter(_grid_filter, self.data_set.grids)
+        grids, points, segments = [], None, []
+        for grid in all_grids:
+            g, new_points, s = m.generate_data(grid)
+            grids.extend(g)
+            if new_points:
+                x, y = new_points
+                if points is None:
+                    points = x, y
+                else:
+                    old_x, old_y = points
+                    points = (np.concatenate((old_x, x)),
+                              np.concatenate((old_y, y)))
+            segments.extend(s)
+        m.draw_data(grids, points, segments)
         return m
 
     @staticmethod
@@ -107,7 +122,7 @@ class Processor:
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
+    target_path = util.get_relative_path(__file__, "../data/world.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()

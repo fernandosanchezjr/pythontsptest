@@ -222,7 +222,7 @@ class Grid(IndexEntry, Index):
     radius: float
     subdivided: bool
     depth: int
-    seed: bool
+    seed: t.Optional[IndexEntry]
 
     def __init__(
         self,
@@ -238,7 +238,7 @@ class Grid(IndexEntry, Index):
         super().__init__(self.numbers.next(), latitude, longitude)
         self.set_contents(contents)
         self.set_precision(constants.DEFAULT_PRECISION)
-        self.seed = False
+        self.seed = None
 
     def __repr__(self):
         return f'{self.__class__.__name__} #{self.id_}[{self.depth}]' \
@@ -276,7 +276,7 @@ class Grid(IndexEntry, Index):
         point_count = len(self.contents)
         if point_count <= constants.MAX_GRID_DENSITY:
             if point_count == 1:
-                self.seed = True
+                self.seed = self.contents[0]
             elif point_count == 2:
                 p1, p2 = self.contents
                 segment = p1.segment_to(p2, p1.distance_to(p2))
