@@ -114,8 +114,8 @@ if __name__ == "__main__":
     processor = Processor.create(target_path)
     processor.subdivide()
     processor.find_subdivided_neighbors()
-    processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
-                                         0.0, -180.0),
-                       b=data.IndexEntry(data.IndexEntry.numbers.next(),
-                                         -90.0, 0.0))
-    processor.show()
+    # processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
+    #                                      0.0, -180.0),
+    #                    b=data.IndexEntry(data.IndexEntry.numbers.next(),
+    #                                      -90.0, 0.0))
+    # processor.show()
