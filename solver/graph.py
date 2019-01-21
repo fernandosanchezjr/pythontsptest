@@ -3,6 +3,7 @@ import typing as t
 
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.collections import PolyCollection
 from mpl_toolkits.basemap import Basemap
 
 from solver import data, util
@@ -30,7 +31,7 @@ class Map:
         if title:
             plt.title(title)
 
-    def to_xy(self, entries: t.List[t.Any]) -> t.Tuple[t.Any, t.Any]:
+    def to_map_xy(self, entries: t.List[t.Any]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
         x, y = bounds.T
         return self.world_map(np.mod(x, 360.0), y)
@@ -39,21 +40,24 @@ class Map:
                    markersize=0.8):
         if points:
             plt.figure(self.fig.number)
-            x, y = self.to_xy([p.map_coords() for p in points])
+            x, y = self.to_map_xy([p.map_coords() for p in points])
             plt.plot(x, y, 'ok', markersize=markersize, color=color)
 
     def add_grids(self, grids: t.List[data.Grid]):
         if grids:
             plt.figure(self.fig.number)
             for grid in grids:
-                x, y = self.to_xy(grid.bounds())
-                plt.plot(x, y, color='blue', linestyle='-', linewidth=1.0)
+                pc = PolyCollection(np.dstack(self.to_map_xy(grid.bounds())),
+                                    edgecolors='blue', facecolors='none',
+                                    linewidths=0.5, zorder=2.0)
+                plt.gca().add_collection(pc)
+            plt.gca().autoscale_view()
 
     def save(self, file_name="graph.png"):
         plt.figure(self.fig.number)
         self.fig.savefig(file_name)
 
-    def draw(self, block=False):
+    def draw(self):
         plt.figure(self.fig.number)
         plt.draw()
 

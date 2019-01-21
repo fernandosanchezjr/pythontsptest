@@ -3,6 +3,7 @@ import itertools
 import logging
 import math
 import typing as t
+from operator import itemgetter
 from os import path
 
 from geoindex import GeoGridIndex, GeoPoint
@@ -22,7 +23,7 @@ class EdgeWeightType(str, enum.Enum):
 Coords = t.Tuple[float, float]
 
 
-def _grid_coordinates(lat: float, lon: float) -> Coords:
+def _initial_grid_coords(lat: float, lon: float) -> Coords:
     return (math.trunc(lat) + (-0.5 if lat < 0.0 else 0.5),
             math.trunc(lon) + (-0.5 if lon < 0.0 else 0.5))
 
@@ -58,6 +59,21 @@ class IndexEntry(GeoPoint):
     def map_coords(self) -> Coords:
         return xy(self.latitude, self.longitude)
 
+    def quandrant_bearing(
+        self,
+        destination: 'IndexEntry'
+    ) -> constants.Quadrant:
+        if destination.latitude >= self.latitude:
+            if destination.longitude >= self.longitude:
+                return constants.Quadrant.Q_I
+            else:
+                return constants.Quadrant.Q_II
+        else:
+            if destination.longitude >= self.longitude:
+                return constants.Quadrant.Q_IV
+            else:
+                return constants.Quadrant.Q_III
+
 
 Distance = t.Tuple[IndexEntry, float]
 Line = t.Tuple[float, float, float, float]
@@ -65,10 +81,8 @@ Line = t.Tuple[float, float, float, float]
 
 class Point(IndexEntry):
     duplicates: t.List['Point']
-    grid: Coords
 
     def __init__(self, id_: int, latitude: float, longitude: float):
-        self.grid = _grid_coordinates(latitude, longitude)
         self.duplicates = []
         super().__init__(id_, latitude, longitude)
 
@@ -86,14 +100,19 @@ class Grid(IndexEntry):
     contents: t.List[IndexEntry]
     precision: int
     index: GeoGridIndex
+    radius: float
+    subdivided: bool
 
     def __init__(
         self,
         latitude: float,
         longitude: float,
         contents: t.List[IndexEntry],
-        precision: int = constants.DEFAULT_PRECISION
+        precision: int = constants.DEFAULT_PRECISION,
+        radius: float = constants.INITIAL_RADIUS
     ):
+        self.subdivided = False
+        self.radius = radius
         self.contents = contents
         super().__init__(self.numbers.next(), latitude, longitude)
         self.precision = precision
@@ -110,7 +129,7 @@ class Grid(IndexEntry):
         for p in self.contents:
             self.index.add_point(p)
 
-    def _radius(self) -> float:
+    def _search_radius(self) -> float:
         return GEO_HASH_GRID_SIZE[self.precision] / 2.0
 
     def get_nearest_points(
@@ -120,7 +139,8 @@ class Grid(IndexEntry):
         while True:
             points = sorted(
                 filter(lambda n: n[1] > 0.0,
-                       self.index.get_nearest_points(target, self._radius())),
+                       self.index.get_nearest_points(
+                           target, self._search_radius())),
                 key=lambda n: n[1])
             if not resize:
                 return points
@@ -133,12 +153,23 @@ class Grid(IndexEntry):
     def map_coords(self) -> Coords:
         return xy(self.latitude, self.longitude)
 
+    def sub_quadrants(self) -> (t.Tuple[float, t.Tuple[Coords,
+                                                       Coords,
+                                                       Coords,
+                                                       Coords]]):
+        new_radius = self.radius / 2.0
+        return (new_radius,
+                ((self.latitude + new_radius, self.longitude + new_radius),
+                 (self.latitude + new_radius, self.longitude - new_radius),
+                 (self.latitude - new_radius, self.longitude - new_radius),
+                 (self.latitude - new_radius, self.longitude + new_radius)))
+
     def bounds(
         self,
     ) -> t.List[Coords]:
         center_x, center_y = self.map_coords()
-        x1, y1 = center_x - 0.5, center_y + 0.5
-        x2, y2 = center_x + 0.5, center_y - 0.5
+        x1, y1 = center_x - self.radius, center_y + self.radius
+        x2, y2 = center_x + self.radius, center_y - self.radius
         if x1 < 0.0 and x2 == 0.0:
             x2 = 359.999999
         return [(x1, y1),
@@ -146,6 +177,27 @@ class Grid(IndexEntry):
                 (x2, y2),
                 (x1, y2),
                 (x1, y1)]
+
+    def subdivide(self) -> t.List[IndexEntry]:
+        if self.subdivided:
+            return self.contents
+        if len(self.contents) <= constants.MAX_GRID_DENSITY:
+            return self.contents
+        new_radius, quadrant_coords = self.sub_quadrants()
+        redistributed_points = ((c, quadrant_coords[self.quandrant_bearing(c)])
+                                for c in self.contents)
+        grouped_points = itertools.groupby(sorted(redistributed_points,
+                                                  key=itemgetter(1)),
+                                           key=itemgetter(1))
+
+        self.contents = [Grid(lat, lon, list(map(itemgetter(0), points)),
+                              radius=new_radius)
+                         for (lat, lon), points in grouped_points]
+        for c in self.contents:
+            if isinstance(c, Grid):
+                c.subdivide()
+        self.subdivided = True
+        return self.contents
 
 
 class DataSet:
@@ -198,10 +250,12 @@ class DataSet:
                 for first, *rest in coordinates.values()]
 
     def _generate_grids(self) -> t.List[Grid]:
-        return [Grid(lat, lon, list(points))
-                for (lat, lon), points in
-                itertools.groupby(sorted(self.points, key=lambda p: p.grid),
-                                  key=lambda p: p.grid)]
+        points = ((p, _initial_grid_coords(p.latitude, p.longitude))
+                  for p in self.points)
+        grouped_points = itertools.groupby(sorted(points, key=itemgetter(1)),
+                                           key=itemgetter(1))
+        return [Grid(lat, lon, list(map(itemgetter(0), points)))
+                for (lat, lon), points in grouped_points]
 
 
 if __name__ == "__main__":
