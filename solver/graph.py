@@ -34,7 +34,7 @@ class Map:
     def to_map_xy(self, entries: t.List[t.Any]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
         x, y = bounds.T
-        return self.world_map(np.mod(x, 360.0), y)
+        return self.world_map(x, y)
 
     def add_points(self, points: t.List[data.IndexEntry], color='black',
                    markersize=0.8):

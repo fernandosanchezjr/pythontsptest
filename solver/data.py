@@ -33,7 +33,7 @@ def _euc_2d_parser(coord: str) -> float:
 
 
 def xy(latitude: float, longitude: float) -> Coords:
-    return longitude, latitude
+    return longitude % 360.0, latitude
 
 
 class IndexEntry(GeoPoint):
@@ -150,9 +150,6 @@ class Grid(IndexEntry):
             else:
                 self._set_precision(self.precision - 1)
 
-    def map_coords(self) -> Coords:
-        return xy(self.latitude, self.longitude)
-
     def sub_quadrants(self) -> (t.Tuple[float, t.Tuple[Coords,
                                                        Coords,
                                                        Coords,
@@ -167,16 +164,15 @@ class Grid(IndexEntry):
     def bounds(
         self,
     ) -> t.List[Coords]:
-        center_x, center_y = self.map_coords()
-        x1, y1 = center_x - self.radius, center_y + self.radius
-        x2, y2 = center_x + self.radius, center_y - self.radius
-        if x1 < 0.0 and x2 == 0.0:
-            x2 = 359.999999
-        return [(x1, y1),
-                (x2, y1),
-                (x2, y2),
-                (x1, y2),
-                (x1, y1)]
+        lat1, lon1 = self.latitude + self.radius, self.longitude - self.radius
+        lat2, lon2 = self.latitude - self.radius, self.longitude + self.radius
+        if lon1 < 0.0 and lon2 == 0.0:
+            lon2 = -0.00000000001
+        return [xy(lat1, lon1),
+                xy(lat1, lon2),
+                xy(lat2, lon2),
+                xy(lat2, lon1),
+                xy(lat1, lon1)]
 
     def subdivide(self) -> t.List[IndexEntry]:
         if self.subdivided:
