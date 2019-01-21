@@ -53,7 +53,7 @@ class Map:
             plt.figure(self.fig.number)
             gca = plt.gca()
             for grid in grids:
-                for terminal in grid.get_terminal_grids():
+                for terminal in grid.get_terminals():
                     gca.add_collection(self._grid_to_poly(terminal))
 
     def save(self, file_name="graph.png"):

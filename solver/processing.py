@@ -77,12 +77,11 @@ class Processor:
     def find_subdivided_neighbors(self):
         if self.index is None:
             return
-        point = self.data_set.points[0]
+        point = self.data_set.grids[0]
         nearest = self.index.get_nearest(point)
         for n, distance in nearest:
-            segment = point.segment(n)
-            logger.info("Nearest to %s (%s): %s -> %s",
-                        point, distance, n, segment)
+            segment = point.segment(n, distance)
+            logger.info("Nearest to %s: %s", point, segment)
 
     @util.timeit
     def draw_map(
@@ -122,3 +121,4 @@ if __name__ == "__main__":
     #                    b=data.IndexEntry(data.IndexEntry.numbers.next(),
     #                                      -90.0, 0.0))
     # processor.show()
+    input("")

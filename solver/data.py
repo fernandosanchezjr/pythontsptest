@@ -8,7 +8,6 @@ from os import path
 
 from geoindex import GeoGridIndex, GeoPoint
 from geoindex.geo_grid_index import GEO_HASH_GRID_SIZE
-from sympy.geometry import line
 
 from solver import constants, util
 
@@ -74,8 +73,55 @@ class IndexEntry(GeoPoint):
             else:
                 return constants.Quadrant.Q_III
 
-    def segment(self, to: 'IndexEntry') -> line.Segment2D:
-        return line.Segment(self.coords, to.coords)
+    def segment(self, to: 'IndexEntry', distance: float) -> 'Segment':
+        return Segment(self, to, distance)
+
+
+class Segment:
+    id_: int
+    endpoints: t.Tuple[IndexEntry, IndexEntry]
+    distance: float
+
+    class Pointer(IndexEntry):
+        segment: 'Segment'
+        entry: IndexEntry
+
+        def __init__(self, segment: 'Segment', entry: IndexEntry):
+            self.__dict__['segment'] = segment
+            self.__dict__['entry'] = entry
+            super().__init__(entry.id_, entry.latitude, entry.longitude)
+
+        def __getstate__(self):
+            return self.__dict__
+
+        def __setstate__(self, state):
+            self.__dict__ = state
+
+        def __getattr__(self, item):
+            print("item:", item)
+            return (getattr(self.segment, item, None) or
+                    getattr(self.entry, item, None))
+
+    def __init__(
+        self,
+        entry1: IndexEntry,
+        entry2: IndexEntry,
+        distance: float
+    ):
+        self.id_ = IndexEntry.numbers.next()
+        self.endpoints = (Segment.Pointer(self, entry1),
+                          Segment.Pointer(self, entry2))
+        self.distance = distance
+
+    def __hash__(self):
+        return self.id_
+
+    def __repr__(self):
+        return f'{self.__class__.__name__} #{self.id_}(' \
+            f'{self.endpoints[0]} -> {self.endpoints[1]} ' \
+            f'distance={self.distance})'
+
+    __str__ = __repr__
 
 
 Distance = t.Tuple[IndexEntry, float]
@@ -95,35 +141,48 @@ class Point(IndexEntry):
         return self
 
 
+Indexable = t.Union[IndexEntry, Segment]
+
+
 class Index:
-    contents: t.List[IndexEntry]
+    contents: t.List[Indexable]
     precision: int
-    index: GeoGridIndex
+    index: t.Optional[GeoGridIndex]
     indexed: bool
 
     def __init__(
         self,
-        contents: t.List[IndexEntry],
+        contents: t.List[Indexable],
         precision: int = constants.DEFAULT_PRECISION
     ):
-        self.contents = contents
-        self._set_precision(precision)
+        self.set_contents(contents)
+        self.set_precision(precision)
 
-    def _set_precision(self, precision):
+    def set_precision(self, precision):
         if precision not in GEO_HASH_GRID_SIZE:
             self.precision = constants.MIN_PRECISION
         else:
             self.precision = precision
-        self.index = GeoGridIndex(precision=self.precision)
         self.indexed = False
+        self.index = None
 
     def _search_radius(self) -> float:
         return GEO_HASH_GRID_SIZE[self.precision] / 2.0
 
+    def set_contents(self, contents: t.List[Indexable]):
+        self.contents = contents
+        self.index = None
+        self.indexed = False
+
     def build_index(self):
         if not self.indexed:
-            for p in self.contents:
-                self.index.add_point(p)
+            self.index = GeoGridIndex(precision=self.precision)
+            for c in self.contents:
+                if isinstance(c, IndexEntry):
+                    self.index.add_point(c)
+                elif isinstance(c, Segment):
+                    for e in c.endpoints:
+                        self.index.add_point(e)
             self.indexed = True
 
     def get_nearest(
@@ -132,25 +191,24 @@ class Index:
     ) -> t.List[Distance]:
         while True:
             self.build_index()
-            points = sorted(
-                filter(lambda n: n[1] > 0.0,
-                       self.index.get_nearest_points(
-                           target, self._search_radius())),
-                key=itemgetter(1))
+            try:
+                points = sorted(
+                    filter(lambda n: n[1] > 0.0,
+                           self.index.get_nearest_points(
+                               target, self._search_radius())),
+                    key=itemgetter(1))
+            except ValueError:
+                points = []
             if not resize:
                 return points
             elif (len(points) >= constants.MIN_RESULT_COUNT or
                   self.precision == constants.MIN_PRECISION):
                 return points
             else:
-                self._set_precision(self.precision - 1)
+                self.set_precision(self.precision - 1)
 
 
 class Grid(IndexEntry, Index):
-    contents: t.List[IndexEntry]
-    precision: int
-    index: GeoGridIndex
-    indexed: bool
     radius: float
     subdivided: bool
     depth: int
@@ -159,18 +217,22 @@ class Grid(IndexEntry, Index):
         self,
         latitude: float,
         longitude: float,
-        contents: t.List[IndexEntry],
-        precision: int = constants.DEFAULT_PRECISION,
+        contents: t.List[Indexable],
         radius: float = constants.INITIAL_RADIUS,
         depth: int = 0
     ):
         self.subdivided = False
-        self.contents = contents
         self.radius = radius
         self.depth = depth
         super().__init__(self.numbers.next(), latitude, longitude)
-        self.precision = None
-        self._set_precision(precision)
+        self.set_contents(contents)
+        self.set_precision(constants.DEFAULT_PRECISION)
+
+    def __repr__(self):
+        return f'{self.__class__.__name__} #{self.id_}[{self.depth}]' \
+            f'({self.latitude}, {self.longitude})'
+
+    __str__ = __repr__
 
     def sub_quadrants(self) -> (t.Tuple[float, t.Tuple[Coords,
                                                        Coords,
@@ -199,7 +261,13 @@ class Grid(IndexEntry, Index):
     def subdivide(self):
         if self.subdivided:
             return
-        if len(self.contents) <= constants.MAX_GRID_DENSITY:
+        point_count = len(self.contents)
+        if point_count <= constants.MAX_GRID_DENSITY:
+            if point_count == 2:
+                p1, p2 = self.contents
+                segment = Segment(p1, p2, p1.distance_to(p2))
+                self.set_contents([segment])
+                logger.info("Terminal %s: %s", self, self.contents)
             return
         new_radius, quadrant_coords = self.sub_quadrants()
         new_depth = self.depth + 1
@@ -208,26 +276,32 @@ class Grid(IndexEntry, Index):
         grouped_points = itertools.groupby(sorted(redistributed_points,
                                                   key=itemgetter(1)),
                                            key=itemgetter(1))
-        self.contents = [Grid(lat, lon, list(map(itemgetter(0), points)),
-                              radius=new_radius, depth=new_depth)
-                         for (lat, lon), points in grouped_points]
-        for c in self.contents:
+        new_contents = [Grid(lat, lon, list(map(itemgetter(0), points)),
+                             radius=new_radius, depth=new_depth)
+                        for (lat, lon), points in grouped_points]
+        for c in new_contents:
             if isinstance(c, Grid):
                 c.subdivide()
+        self.set_contents(new_contents)
         self.subdivided = True
 
-    def get_terminal_grids(self):
+    def get_terminals(self):
         if not self.subdivided:
             return [self]
-        return itertools.chain.from_iterable((c.get_terminal_grids()
+        return itertools.chain.from_iterable((c.get_terminals()
                                               for c in self.contents
                                               if isinstance(c, Grid)))
+
+    def get_nearest(
+        self, target: IndexEntry,
+        resize: bool = True
+    ) -> t.List[Distance]:
+        return self.index.get_nearest(target, resize=resize)
 
 
 class DataSet:
     name: str
     edge_weight_type: EdgeWeightType
-    points: t.List[Point]
     grids: t.List[Grid]
     file_name: str
 
@@ -238,9 +312,9 @@ class DataSet:
             meta_data = self._read_metadata(fh)
             self.name = meta_data.get("name")
             self.edge_weight_type = meta_data.get("edge_weight_type")
-            self.points = self._read_points(fh, self.edge_weight_type)
-            self.grids = self._generate_grids()
-        logger.info("Loaded %s points", len(self.points))
+            points = self._read_points(fh, self.edge_weight_type)
+            self.grids = self._generate_grids(points)
+        logger.info("Loaded %s points", len(points))
         logger.info("Generated %s grids", len(self.grids))
 
     @staticmethod
@@ -257,7 +331,7 @@ class DataSet:
     def _read_points(
         fh: t.TextIO,
         edge_weight_type: EdgeWeightType
-    ) -> t.List[Distance]:
+    ) -> t.List[IndexEntry]:
         coord_parser = float
         if edge_weight_type == EdgeWeightType.EUC_2D:
             coord_parser = _euc_2d_parser
@@ -273,9 +347,10 @@ class DataSet:
         return [first.merge_duplicates(rest)
                 for first, *rest in coordinates.values()]
 
-    def _generate_grids(self) -> t.List[Grid]:
+    @staticmethod
+    def _generate_grids(points: t.Iterable[IndexEntry]) -> t.List[Grid]:
         points = ((p, _initial_grid_coords(p.latitude, p.longitude))
-                  for p in self.points)
+                  for p in points)
         grouped_points = itertools.groupby(sorted(points, key=itemgetter(1)),
                                            key=itemgetter(1))
         return [Grid(lat, lon, list(map(itemgetter(0), points)))
