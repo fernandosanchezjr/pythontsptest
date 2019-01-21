@@ -40,7 +40,7 @@ class Map:
                    markersize=0.8):
         if points:
             plt.figure(self.fig.number)
-            x, y = self.to_map_xy([p.map_coords() for p in points])
+            x, y = self.to_map_xy([p.map_coords for p in points])
             plt.plot(x, y, 'ok', markersize=markersize, color=color)
 
     def add_grids(self, grids: t.List[data.Grid]):

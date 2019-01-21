@@ -53,6 +53,11 @@ class IndexEntry(GeoPoint):
 
     __str__ = __repr__
 
+    @property
+    def coords(self) -> Coords:
+        return self.latitude, self.longitude
+
+    @property
     def map_coords(self) -> Coords:
         return xy(self.latitude, self.longitude)
 
@@ -83,10 +88,6 @@ class Point(IndexEntry):
         self.duplicates = []
         super().__init__(id_, latitude, longitude)
 
-    @property
-    def coords(self) -> Coords:
-        return self.longitude, self.latitude
-
     def merge_duplicates(self, duplicates: t.List['Point']) -> 'Point':
         if duplicates:
             self.duplicates.extend(duplicates)
@@ -97,6 +98,7 @@ class Grid(IndexEntry):
     contents: t.List[IndexEntry]
     precision: int
     index: GeoGridIndex
+    indexed: bool
     radius: float
     subdivided: bool
 
@@ -123,22 +125,25 @@ class Grid(IndexEntry):
         else:
             self.precision = precision
         self.index = GeoGridIndex(precision=self.precision)
-        for p in self.contents:
-            self.index.add_point(p)
+        self.indexed = False
 
     def _search_radius(self) -> float:
         return GEO_HASH_GRID_SIZE[self.precision] / 2.0
 
-    def get_nearest_points(
-        self, target: GeoPoint,
+    def get_nearest(
+        self, target: IndexEntry,
         resize: bool = True
     ) -> t.List[Distance]:
+        if not self.indexed:
+            for p in self.contents:
+                self.index.add_point(p)
+            self.indexed = True
         while True:
             points = sorted(
                 filter(lambda n: n[1] > 0.0,
                        self.index.get_nearest_points(
                            target, self._search_radius())),
-                key=lambda n: n[1])
+                key=itemgetter(1))
             if not resize:
                 return points
             elif (len(points) >= constants.MIN_RESULT_COUNT or
@@ -182,7 +187,6 @@ class Grid(IndexEntry):
         grouped_points = itertools.groupby(sorted(redistributed_points,
                                                   key=itemgetter(1)),
                                            key=itemgetter(1))
-
         self.contents = [Grid(lat, lon, list(map(itemgetter(0), points)),
                               radius=new_radius)
                          for (lat, lon), points in grouped_points]

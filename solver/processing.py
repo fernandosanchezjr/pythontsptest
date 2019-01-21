@@ -45,7 +45,7 @@ class Processor:
         if len(grid.contents) <= 1:
             return grid
         for point in grid.contents:
-            nearest = grid.get_nearest_points(point)
+            nearest = grid.get_nearest(point)
             logger.info("Nearest to %s in %s: %s", point, grid, nearest)
         logger.info("%s processed", grid)
         return grid
