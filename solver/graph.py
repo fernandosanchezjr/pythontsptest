@@ -51,8 +51,8 @@ class Map:
     def add_grids(self, grids: t.List[data.Grid]):
         if grids:
             plt.figure(self.fig.number)
+            gca = plt.gca()
             for grid in grids:
-                gca = plt.gca()
                 for terminal in grid.get_terminal_grids():
                     gca.add_collection(self._grid_to_poly(terminal))
 

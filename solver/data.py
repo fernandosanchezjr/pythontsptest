@@ -37,7 +37,7 @@ def xy(latitude: float, longitude: float) -> Coords:
 
 
 class IndexEntry(GeoPoint):
-    numbers = util.Numbers()
+    numbers: t.ClassVar[util.Numbers] = util.Numbers()
     id_: int
 
     def __init__(self, id_: int, latitude: float, longitude: float):
@@ -91,32 +91,21 @@ class Point(IndexEntry):
         return self
 
 
-class Grid(IndexEntry):
+class Index:
     contents: t.List[IndexEntry]
     precision: int
     index: GeoGridIndex
     indexed: bool
-    radius: float
-    subdivided: bool
 
     def __init__(
         self,
-        latitude: float,
-        longitude: float,
         contents: t.List[IndexEntry],
-        precision: int = constants.DEFAULT_PRECISION,
-        radius: float = constants.INITIAL_RADIUS
+        precision: int = constants.DEFAULT_PRECISION
     ):
-        self.subdivided = False
-        self.radius = radius
         self.contents = contents
-        super().__init__(self.numbers.next(), latitude, longitude)
-        self.precision = precision
         self._set_precision(precision)
 
     def _set_precision(self, precision):
-        if self.precision == constants.MIN_PRECISION:
-            return
         if precision not in GEO_HASH_GRID_SIZE:
             self.precision = constants.MIN_PRECISION
         else:
@@ -127,15 +116,18 @@ class Grid(IndexEntry):
     def _search_radius(self) -> float:
         return GEO_HASH_GRID_SIZE[self.precision] / 2.0
 
-    def get_nearest(
-        self, target: IndexEntry,
-        resize: bool = True
-    ) -> t.List[Distance]:
+    def build_index(self):
         if not self.indexed:
             for p in self.contents:
                 self.index.add_point(p)
             self.indexed = True
+
+    def get_nearest(
+        self, target: IndexEntry,
+        resize: bool = True
+    ) -> t.List[Distance]:
         while True:
+            self.build_index()
             points = sorted(
                 filter(lambda n: n[1] > 0.0,
                        self.index.get_nearest_points(
@@ -148,6 +140,33 @@ class Grid(IndexEntry):
                 return points
             else:
                 self._set_precision(self.precision - 1)
+
+
+class Grid(IndexEntry, Index):
+    contents: t.List[IndexEntry]
+    precision: int
+    index: GeoGridIndex
+    indexed: bool
+    radius: float
+    subdivided: bool
+    depth: int
+
+    def __init__(
+        self,
+        latitude: float,
+        longitude: float,
+        contents: t.List[IndexEntry],
+        precision: int = constants.DEFAULT_PRECISION,
+        radius: float = constants.INITIAL_RADIUS,
+        depth: int = 0
+    ):
+        self.subdivided = False
+        self.contents = contents
+        self.radius = radius
+        self.depth = depth
+        super().__init__(self.numbers.next(), latitude, longitude)
+        self.precision = None
+        self._set_precision(precision)
 
     def sub_quadrants(self) -> (t.Tuple[float, t.Tuple[Coords,
                                                        Coords,
@@ -173,25 +192,25 @@ class Grid(IndexEntry):
                 xy(lat2, lon1),
                 xy(lat1, lon1)]
 
-    def subdivide(self) -> t.List[IndexEntry]:
+    def subdivide(self):
         if self.subdivided:
-            return self.contents
+            return
         if len(self.contents) <= constants.MAX_GRID_DENSITY:
-            return self.contents
+            return
         new_radius, quadrant_coords = self.sub_quadrants()
+        new_depth = self.depth + 1
         redistributed_points = ((c, quadrant_coords[self.quandrant_bearing(c)])
                                 for c in self.contents)
         grouped_points = itertools.groupby(sorted(redistributed_points,
                                                   key=itemgetter(1)),
                                            key=itemgetter(1))
         self.contents = [Grid(lat, lon, list(map(itemgetter(0), points)),
-                              radius=new_radius)
+                              radius=new_radius, depth=new_depth)
                          for (lat, lon), points in grouped_points]
         for c in self.contents:
             if isinstance(c, Grid):
                 c.subdivide()
         self.subdivided = True
-        return self.contents
 
     def get_terminal_grids(self):
         if not self.subdivided:

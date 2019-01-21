@@ -15,6 +15,7 @@ class Processor:
     _executor: futures.ThreadPoolExecutor
     _loop: asyncio.events.AbstractEventLoop
     data_set: data.DataSet
+    index: t.Optional[data.Index]
 
     def __init__(self, data_set: data.DataSet):
         self._executor = futures.ProcessPoolExecutor(
@@ -22,6 +23,7 @@ class Processor:
         )
         self._loop = asyncio.get_event_loop()
         self.data_set = data_set
+        self.index = None
 
     @classmethod
     def create(cls, file_path: str) -> 'Processor':
@@ -57,19 +59,27 @@ class Processor:
             ([g] for g in self.data_set.grids)))
         self.data_set.grids = result_grids
 
+    @util.timeit
+    def find_subdivided_neighbors(self):
+        if self.index is None:
+            return
+        point = self.data_set.points[0]
+        nearest = self.index.get_nearest(point)
+        logger.info("Nearest to %s: %s", point, nearest)
+
     @staticmethod
     def _subdivide(grid: data.Grid) -> data.Grid:
-        if len(grid.contents) <= constants.MAX_GRID_DENSITY:
-            return grid
         grid.subdivide()
         return grid
 
     @util.timeit
     def subdivide(self):
-        result_grids = self.wait(self.execute_many(
+        new_grids = self.wait(self.execute_many(
             self._subdivide,
             ([g] for g in self.data_set.grids)))
-        self.data_set.grids = result_grids
+        self.data_set.grids = new_grids
+        self.index = data.Index(self.data_set.grids)
+        self.index.build_index()
 
     @util.timeit
     def draw_map(
@@ -103,6 +113,7 @@ if __name__ == "__main__":
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()
+    processor.find_subdivided_neighbors()
     processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
                                          0.0, -180.0),
                        b=data.IndexEntry(data.IndexEntry.numbers.next(),
