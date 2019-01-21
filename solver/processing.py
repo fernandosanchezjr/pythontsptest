@@ -81,7 +81,7 @@ class Processor:
         grids = self.data_set.grids
         if a or b:
 
-            def _grid_filter(grid: data.Grid,) -> bool:
+            def _grid_filter(grid: data.Grid) -> bool:
                 if a and a.quandrant_bearing(grid) != constants.Quadrant.Q_IV:
                     return False
                 if b and b.quandrant_bearing(grid) != constants.Quadrant.Q_II:
@@ -99,7 +99,7 @@ class Processor:
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/world.tsp")
+    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()

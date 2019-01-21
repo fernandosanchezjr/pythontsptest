@@ -61,17 +61,14 @@ class IndexEntry(GeoPoint):
     def map_coords(self) -> Coords:
         return xy(self.latitude, self.longitude)
 
-    def quandrant_bearing(
-        self,
-        destination: 'IndexEntry'
-    ) -> constants.Quadrant:
-        if destination.latitude >= self.latitude:
-            if destination.longitude >= self.longitude:
+    def quandrant_bearing(self, to: 'IndexEntry') -> constants.Quadrant:
+        if to.latitude >= self.latitude:
+            if to.longitude >= self.longitude:
                 return constants.Quadrant.Q_I
             else:
                 return constants.Quadrant.Q_II
         else:
-            if destination.longitude >= self.longitude:
+            if to.longitude >= self.longitude:
                 return constants.Quadrant.Q_IV
             else:
                 return constants.Quadrant.Q_III
@@ -195,6 +192,13 @@ class Grid(IndexEntry):
                 c.subdivide()
         self.subdivided = True
         return self.contents
+
+    def get_terminal_grids(self):
+        if not self.subdivided:
+            return [self]
+        return itertools.chain.from_iterable((c.get_terminal_grids()
+                                              for c in self.contents
+                                              if isinstance(c, Grid)))
 
 
 class DataSet:

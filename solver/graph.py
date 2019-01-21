@@ -43,15 +43,18 @@ class Map:
             x, y = self.to_map_xy([p.map_coords for p in points])
             plt.plot(x, y, 'ok', markersize=markersize, color=color)
 
+    def _grid_to_poly(self, grid):
+        return PolyCollection(np.dstack(self.to_map_xy(grid.bounds())),
+                              edgecolors='blue', facecolors='none',
+                              linewidths=1.0+grid.radius, zorder=2.0)
+
     def add_grids(self, grids: t.List[data.Grid]):
         if grids:
             plt.figure(self.fig.number)
             for grid in grids:
-                pc = PolyCollection(np.dstack(self.to_map_xy(grid.bounds())),
-                                    edgecolors='blue', facecolors='none',
-                                    linewidths=0.5, zorder=2.0)
-                plt.gca().add_collection(pc)
-            plt.gca().autoscale_view()
+                gca = plt.gca()
+                for terminal in grid.get_terminal_grids():
+                    gca.add_collection(self._grid_to_poly(terminal))
 
     def save(self, file_name="graph.png"):
         plt.figure(self.fig.number)
