@@ -7,7 +7,6 @@ import psutil
 
 from solver import constants, data, graph, util
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -59,14 +58,6 @@ class Processor:
             ([g] for g in self.data_set.grids)))
         self.data_set.grids = result_grids
 
-    @util.timeit
-    def find_subdivided_neighbors(self):
-        if self.index is None:
-            return
-        point = self.data_set.points[0]
-        nearest = self.index.get_nearest(point)
-        logger.info("Nearest to %s: %s", point, nearest)
-
     @staticmethod
     def _subdivide(grid: data.Grid) -> data.Grid:
         grid.subdivide()
@@ -82,6 +73,13 @@ class Processor:
         self.index.build_index()
 
     @util.timeit
+    def find_subdivided_neighbors(self):
+        if self.index is None:
+            return
+        # for grid in self.data_set.grids:
+        #     print(grid)
+
+    @util.timeit
     def draw_map(
         self,
         a: t.Optional[data.IndexEntry] = None,
@@ -91,16 +89,16 @@ class Processor:
         grids = self.data_set.grids
         if a or b:
 
-            def _grid_filter(grid: data.Grid) -> bool:
-                if a and a.quandrant_bearing(grid) != constants.Quadrant.Q_IV:
+            def _grid_filter(fg: data.Grid) -> bool:
+                if a and a.quandrant_bearing(fg) != constants.Quadrant.Q_IV:
                     return False
-                if b and b.quandrant_bearing(grid) != constants.Quadrant.Q_II:
+                if b and b.quandrant_bearing(fg) != constants.Quadrant.Q_II:
                     return False
                 return True
 
             grids = filter(_grid_filter, self.data_set.grids)
-        m.add_grids(grids)
-        m.save(f"{self.data_set.name}_map.png")
+        for grid in grids:
+            m.draw_data(*m.generate_data(grid))
         return m
 
     @staticmethod
@@ -114,8 +112,8 @@ if __name__ == "__main__":
     processor = Processor.create(target_path)
     processor.subdivide()
     processor.find_subdivided_neighbors()
-    # processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
-    #                                      0.0, -180.0),
-    #                    b=data.IndexEntry(data.IndexEntry.numbers.next(),
-    #                                      -90.0, 0.0))
-    # processor.show()
+    processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                         0.0, -90.0),
+                       b=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                         -60.0, -50.0))
+    processor.show()
