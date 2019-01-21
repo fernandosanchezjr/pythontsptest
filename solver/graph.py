@@ -18,9 +18,11 @@ MapData = t.Tuple[GridCoords, PointCoords, SegmentCoords]
 
 class Map:
     numbers = util.Numbers()
+    title: t.Any
 
     def __init__(self, title=""):
-        self.fig = plt.figure(title or self.numbers.next())
+        self.title = title
+        self.fig = plt.figure(self.title or self.numbers.next())
         # miller projection
         self.world_map = Basemap(projection='mill', lon_0=180)
         # plot coastlines, draw label meridians and parallels.
@@ -34,7 +36,7 @@ class Map:
         self.world_map.drawmapboundary(fill_color='aqua')
         self.world_map.fillcontinents(color='coral', lake_color='aqua')
         if title:
-            plt.title(title)
+            plt.title(self.title)
 
     def to_map_xy(self, entries: t.List[data.Coords]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
@@ -52,7 +54,8 @@ class Map:
     def plot_points(points: PointCoords, color='black',
                     markersize=0.8):
         if points:
-            plt.plot(points, 'ok', markersize=markersize, color=color,
+            x, y = points
+            plt.plot(x, y, 'ok', markersize=markersize, color=color,
                      zorder=3.0)
 
     @staticmethod
@@ -120,13 +123,9 @@ class Map:
         self.plot_points(points)
         self.plot_segments(segments)
 
-    def save(self, file_name="graph.png"):
+    def save(self, file_name="graph.eps", file_format="eps"):
         plt.figure(self.fig.number)
-        self.fig.savefig(file_name)
-
-    def draw(self):
-        plt.figure(self.fig.number)
-        plt.draw()
+        self.fig.savefig(file_name, format=file_format)
 
     @classmethod
     def show(cls):
@@ -139,5 +138,3 @@ if __name__ == "__main__":
                           data.Point(6409, -54.45, -66.5)])
     m.plot_points(ps)
     m.save()
-    m.draw()
-    m.show()

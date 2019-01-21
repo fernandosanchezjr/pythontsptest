@@ -99,7 +99,6 @@ class Processor:
             grids = filter(_grid_filter, self.data_set.grids)
         for grid in grids:
             m.draw_data(*m.generate_data(grid))
-        m.save(f"{self.data_set.name}_map.png")
         return m
 
     @staticmethod
@@ -108,7 +107,7 @@ class Processor:
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/world.tsp")
+    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()
