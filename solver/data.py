@@ -8,6 +8,7 @@ from os import path
 
 from geoindex import GeoGridIndex, GeoPoint
 from geoindex.geo_grid_index import GEO_HASH_GRID_SIZE
+from sympy.geometry import line
 
 from solver import constants, util
 
@@ -33,7 +34,7 @@ def _euc_2d_parser(coord: str) -> float:
 
 
 def xy(latitude: float, longitude: float) -> Coords:
-    return longitude % 360.0, latitude
+    return longitude, latitude
 
 
 class IndexEntry(GeoPoint):
@@ -55,11 +56,11 @@ class IndexEntry(GeoPoint):
 
     @property
     def coords(self) -> Coords:
-        return self.latitude, self.longitude
+        return xy(self.latitude, self.longitude)
 
     @property
     def map_coords(self) -> Coords:
-        return xy(self.latitude, self.longitude)
+        return xy(self.latitude, self.longitude % 360.0)
 
     def quandrant_bearing(self, to: 'IndexEntry') -> constants.Quadrant:
         if to.latitude >= self.latitude:
@@ -72,6 +73,9 @@ class IndexEntry(GeoPoint):
                 return constants.Quadrant.Q_IV
             else:
                 return constants.Quadrant.Q_III
+
+    def segment(self, to: 'IndexEntry') -> line.Segment2D:
+        return line.Segment(self.coords, to.coords)
 
 
 Distance = t.Tuple[IndexEntry, float]
@@ -242,10 +246,10 @@ class DataSet:
     @staticmethod
     def _read_metadata(fh: t.TextIO) -> t.Mapping[str, str]:
         meta_data = {}
-        for line in fh:
-            if COORD_DELIMITER in line:
+        for read_line in fh:
+            if COORD_DELIMITER in read_line:
                 break
-            field, value = line.strip().split(" : ")
+            field, value = read_line.strip().split(" : ")
             meta_data[field.lower()] = value
         return meta_data
 
@@ -258,9 +262,9 @@ class DataSet:
         if edge_weight_type == EdgeWeightType.EUC_2D:
             coord_parser = _euc_2d_parser
         coordinates: t.Dict[Coords, t.List[Point]] = {}
-        for line in fh:
+        for read_line in fh:
             try:
-                id_, lat, lon = line.strip().split(" ")
+                id_, lat, lon = read_line.strip().split(" ")
                 point = Point(int(id_), coord_parser(lat), coord_parser(lon))
                 points = coordinates.setdefault(point.coords, [])
                 points.append(point)

@@ -59,14 +59,6 @@ class Processor:
             ([g] for g in self.data_set.grids)))
         self.data_set.grids = result_grids
 
-    @util.timeit
-    def find_subdivided_neighbors(self):
-        if self.index is None:
-            return
-        point = self.data_set.points[0]
-        nearest = self.index.get_nearest(point)
-        logger.info("Nearest to %s: %s", point, nearest)
-
     @staticmethod
     def _subdivide(grid: data.Grid) -> data.Grid:
         grid.subdivide()
@@ -80,6 +72,17 @@ class Processor:
         self.data_set.grids = new_grids
         self.index = data.Index(self.data_set.grids)
         self.index.build_index()
+
+    @util.timeit
+    def find_subdivided_neighbors(self):
+        if self.index is None:
+            return
+        point = self.data_set.points[0]
+        nearest = self.index.get_nearest(point)
+        for n, distance in nearest:
+            segment = point.segment(n)
+            logger.info("Nearest to %s (%s): %s -> %s",
+                        point, distance, n, segment)
 
     @util.timeit
     def draw_map(
