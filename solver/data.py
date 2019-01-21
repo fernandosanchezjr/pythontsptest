@@ -73,7 +73,7 @@ class IndexEntry(GeoPoint):
             else:
                 return constants.Quadrant.Q_III
 
-    def segment(self, to: 'IndexEntry', distance: float) -> 'Segment':
+    def segment_to(self, to: 'IndexEntry', distance: float) -> 'Segment':
         return Segment(self, to, distance)
 
 
@@ -98,8 +98,11 @@ class Segment:
             self.__dict__ = state
 
         def __getattr__(self, item):
-            return (getattr(self.segment, item, None) or
-                    getattr(self.entry, item, None))
+            return (getattr(self.entry, item, None) or
+                    getattr(self.segment, item, None))
+
+        def segment_to(self, to: 'IndexEntry', distance: float) -> 'Segment':
+            return Segment(self.__dict__['entry'], to, distance)
 
     def __init__(
         self,
@@ -219,6 +222,7 @@ class Grid(IndexEntry, Index):
     radius: float
     subdivided: bool
     depth: int
+    seed: bool
 
     def __init__(
         self,
@@ -234,6 +238,7 @@ class Grid(IndexEntry, Index):
         super().__init__(self.numbers.next(), latitude, longitude)
         self.set_contents(contents)
         self.set_precision(constants.DEFAULT_PRECISION)
+        self.seed = False
 
     def __repr__(self):
         return f'{self.__class__.__name__} #{self.id_}[{self.depth}]' \
@@ -270,9 +275,11 @@ class Grid(IndexEntry, Index):
             return
         point_count = len(self.contents)
         if point_count <= constants.MAX_GRID_DENSITY:
-            if point_count == 2:
+            if point_count == 1:
+                self.seed = True
+            elif point_count == 2:
                 p1, p2 = self.contents
-                segment = Segment(p1, p2, p1.distance_to(p2))
+                segment = p1.segment_to(p2, p1.distance_to(p2))
                 self.set_contents([segment])
             return
         new_radius, quadrant_coords = self.sub_quadrants()
