@@ -3,3 +3,4 @@ psutil==5.4.8
 numpy==1.15.4
 matplotlib==3.0.2
 basemap==1.2.0
+sympy==1.3
