@@ -3,12 +3,17 @@ import typing as t
 
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.collections import PolyCollection
+from matplotlib.collections import LineCollection, PolyCollection
 from mpl_toolkits.basemap import Basemap
 
 from solver import data, util
 
 logger = logging.getLogger(__name__)
+
+GridCoords = t.List[PolyCollection]
+PointCoords = t.Optional[t.Tuple[t.Any, t.Any]]
+SegmentCoords = t.Optional[LineCollection]
+MapData = t.Tuple[GridCoords, PointCoords, SegmentCoords]
 
 
 class Map:
@@ -31,30 +36,89 @@ class Map:
         if title:
             plt.title(title)
 
-    def to_map_xy(self, entries: t.List[t.Any]) -> t.Tuple[t.Any, t.Any]:
+    def to_map_xy(self, entries: t.List[data.Coords]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
         x, y = bounds.T
         return self.world_map(x, y)
 
-    def add_points(self, points: t.List[data.IndexEntry], color='black',
-                   markersize=0.8):
-        if points:
-            plt.figure(self.fig.number)
-            x, y = self.to_map_xy([p.map_coords for p in points])
-            plt.plot(x, y, 'ok', markersize=markersize, color=color)
-
-    def _grid_to_poly(self, grid):
-        return PolyCollection(np.dstack(self.to_map_xy(grid.bounds())),
-                              edgecolors='blue', facecolors='none',
-                              linewidths=1.0+grid.radius, zorder=2.0)
-
-    def add_grids(self, grids: t.List[data.Grid]):
+    @staticmethod
+    def plot_grids(grids: GridCoords):
         if grids:
-            plt.figure(self.fig.number)
             gca = plt.gca()
             for grid in grids:
-                for terminal in grid.get_terminals():
-                    gca.add_collection(self._grid_to_poly(terminal))
+                gca.add_collection(grid)
+
+    @staticmethod
+    def plot_points(points: PointCoords, color='black',
+                    markersize=0.8):
+        if points:
+            plt.plot(points, 'ok', markersize=markersize, color=color,
+                     zorder=3.0)
+
+    @staticmethod
+    def plot_segments(segments: t.Optional[LineCollection]):
+        if segments:
+            gca = plt.gca()
+            gca.add_collection(segments)
+
+    def grid_to_map(self, grid) -> PolyCollection:
+        return PolyCollection(np.dstack(self.to_map_xy(grid.bounds())),
+                              edgecolors='blue', facecolors='none',
+                              linewidths=1.0 + grid.radius, zorder=2.0)
+
+    def points_to_map(
+        self,
+        points: t.List[data.Point]
+    ) -> t.Optional[t.Tuple[t.Any, t.Any]]:
+        if not points:
+            return None
+        return self.to_map_xy([p.map_coords for p in points])
+
+    def endpoint_to_map(
+        self,
+        endpoints: t.List[data.Coords]
+    ) -> t.List[data.Coords]:
+        return list(np.dstack(self.to_map_xy(endpoints)))
+
+    def segments_to_map(
+        self,
+        segments: t.List[data.Segment]
+    ) -> t.Optional[LineCollection]:
+        if not segments:
+            return None
+        lines = []
+        for s in segments:
+            lines.extend(np.dstack(self.to_map_xy(s.map_endpoints)))
+        return LineCollection(lines, colors='green', linewidths=0.75,
+                              linestyles='solid', zorder=4)
+
+    def generate_data(
+        self,
+        grid: data.Grid
+    ) -> MapData:
+        terminals = []
+        points = []
+        segments = []
+        for terminal in grid.get_terminals():
+            terminals.append(self.grid_to_map(terminal))
+            for entry in terminal.contents:
+                if isinstance(entry, data.Point):
+                    points.append(entry)
+                elif isinstance(entry, data.Segment):
+                    segments.append(entry)
+        return terminals, self.points_to_map(points), self.segments_to_map(
+            segments)
+
+    def draw_data(
+        self,
+        grids: GridCoords,
+        points: PointCoords = None,
+        segments: SegmentCoords = None
+    ):
+        plt.figure(self.fig.number)
+        self.plot_grids(grids)
+        self.plot_points(points)
+        self.plot_segments(segments)
 
     def save(self, file_name="graph.png"):
         plt.figure(self.fig.number)
@@ -71,8 +135,9 @@ class Map:
 
 if __name__ == "__main__":
     m = Map("test!")
-    m.add_points([data.Point(2360, -54.2666667, -66.7666667),
-                  data.Point(6409, -54.45, -66.5)])
+    ps = m.points_to_map([data.Point(2360, -54.2666667, -66.7666667),
+                          data.Point(6409, -54.45, -66.5)])
+    m.plot_points(ps)
     m.save()
     m.draw()
     m.show()

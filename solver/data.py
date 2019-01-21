@@ -79,17 +79,17 @@ class IndexEntry(GeoPoint):
 
 class Segment:
     id_: int
-    endpoints: t.Tuple[IndexEntry, IndexEntry]
+    _endpoints: t.Set[IndexEntry]
     distance: float
 
     class Pointer(IndexEntry):
         segment: 'Segment'
         entry: IndexEntry
 
+        # noinspection PyMissingConstructor
         def __init__(self, segment: 'Segment', entry: IndexEntry):
             self.__dict__['segment'] = segment
             self.__dict__['entry'] = entry
-            super().__init__(entry.id_, entry.latitude, entry.longitude)
 
         def __getstate__(self):
             return self.__dict__
@@ -98,7 +98,6 @@ class Segment:
             self.__dict__ = state
 
         def __getattr__(self, item):
-            print("item:", item)
             return (getattr(self.segment, item, None) or
                     getattr(self.entry, item, None))
 
@@ -109,12 +108,16 @@ class Segment:
         distance: float
     ):
         self.id_ = IndexEntry.numbers.next()
-        self.endpoints = (Segment.Pointer(self, entry1),
-                          Segment.Pointer(self, entry2))
+        self._endpoints = frozenset((Segment.Pointer(self, entry1),
+                                    Segment.Pointer(self, entry2)))
         self.distance = distance
 
     def __hash__(self):
         return self.id_
+
+    @property
+    def endpoints(self):
+        return tuple(iter(self._endpoints))
 
     def __repr__(self):
         return f'{self.__class__.__name__} #{self.id_}(' \
@@ -123,9 +126,13 @@ class Segment:
 
     __str__ = __repr__
 
+    @property
+    def map_endpoints(self) -> t.List[Coords]:
+        a, b = self.endpoints
+        return [a.map_coords, b.map_coords]
+
 
 Distance = t.Tuple[IndexEntry, float]
-Line = t.Tuple[float, float, float, float]
 
 
 class Point(IndexEntry):
@@ -248,15 +255,15 @@ class Grid(IndexEntry, Index):
     def bounds(
         self,
     ) -> t.List[Coords]:
-        lat1, lon1 = self.latitude + self.radius, self.longitude - self.radius
-        lat2, lon2 = self.latitude - self.radius, self.longitude + self.radius
+        lon, lat = self.map_coords
+        lon1, lat1 = lon - self.radius, lat + self.radius
+        lon2, lat2 = lon + self.radius, lat - self.radius
         if lon1 < 0.0 and lon2 == 0.0:
             lon2 = -0.00000000001
-        return [xy(lat1, lon1),
-                xy(lat1, lon2),
-                xy(lat2, lon2),
-                xy(lat2, lon1),
-                xy(lat1, lon1)]
+        return [(lon1, lat1),
+                (lon2, lat1),
+                (lon2, lat2),
+                (lon1, lat2)]
 
     def subdivide(self):
         if self.subdivided:
@@ -267,7 +274,6 @@ class Grid(IndexEntry, Index):
                 p1, p2 = self.contents
                 segment = Segment(p1, p2, p1.distance_to(p2))
                 self.set_contents([segment])
-                logger.info("Terminal %s: %s", self, self.contents)
             return
         new_radius, quadrant_coords = self.sub_quadrants()
         new_depth = self.depth + 1

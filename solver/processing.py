@@ -7,7 +7,6 @@ import psutil
 
 from solver import constants, data, graph, util
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -77,11 +76,8 @@ class Processor:
     def find_subdivided_neighbors(self):
         if self.index is None:
             return
-        point = self.data_set.grids[0]
-        nearest = self.index.get_nearest(point)
-        for n, distance in nearest:
-            segment = point.segment(n, distance)
-            logger.info("Nearest to %s: %s", point, segment)
+        # for grid in self.data_set.grids:
+        #     print(grid)
 
     @util.timeit
     def draw_map(
@@ -93,15 +89,16 @@ class Processor:
         grids = self.data_set.grids
         if a or b:
 
-            def _grid_filter(grid: data.Grid) -> bool:
-                if a and a.quandrant_bearing(grid) != constants.Quadrant.Q_IV:
+            def _grid_filter(fg: data.Grid) -> bool:
+                if a and a.quandrant_bearing(fg) != constants.Quadrant.Q_IV:
                     return False
-                if b and b.quandrant_bearing(grid) != constants.Quadrant.Q_II:
+                if b and b.quandrant_bearing(fg) != constants.Quadrant.Q_II:
                     return False
                 return True
 
             grids = filter(_grid_filter, self.data_set.grids)
-        m.add_grids(grids)
+        for grid in grids:
+            m.draw_data(*m.generate_data(grid))
         m.save(f"{self.data_set.name}_map.png")
         return m
 
@@ -111,14 +108,13 @@ class Processor:
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
+    target_path = util.get_relative_path(__file__, "../data/world.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()
     processor.find_subdivided_neighbors()
-    # processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
-    #                                      0.0, -180.0),
-    #                    b=data.IndexEntry(data.IndexEntry.numbers.next(),
-    #                                      -90.0, 0.0))
-    # processor.show()
-    input("")
+    processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                         0.0, -90.0),
+                       b=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                         -60.0, -50.0))
+    processor.show()
