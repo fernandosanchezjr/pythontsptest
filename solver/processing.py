@@ -72,9 +72,24 @@ class Processor:
         self.data_set.grids = result_grids
 
     @util.timeit
-    def draw_map(self) -> graph.Map:
+    def draw_map(
+        self,
+        a: t.Optional[data.IndexEntry] = None,
+        b: t.Optional[data.IndexEntry] = None
+    ) -> graph.Map:
         m = graph.Map(f"{self.data_set.name} map")
-        m.add_grids(self.data_set.grids)
+        grids = self.data_set.grids
+        if a or b:
+
+            def _grid_filter(grid: data.Grid,) -> bool:
+                if a and a.quandrant_bearing(grid) != constants.Quadrant.Q_IV:
+                    return False
+                if b and b.quandrant_bearing(grid) != constants.Quadrant.Q_II:
+                    return False
+                return True
+
+            grids = filter(_grid_filter, self.data_set.grids)
+        m.add_grids(grids)
         m.save(f"{self.data_set.name}_map.png")
         return m
 
@@ -84,10 +99,12 @@ class Processor:
 
 
 if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
+    target_path = util.get_relative_path(__file__, "../data/world.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()
-    # processor.find_grid_neighbors()
-    processor.draw_map()
+    processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                         0.0, -180.0),
+                       b=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                         -90.0, 0.0))
     processor.show()

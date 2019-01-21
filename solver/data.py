@@ -48,9 +48,6 @@ class IndexEntry(GeoPoint):
         return self.id_
 
     def __repr__(self):
-        """
-        Machine representation of Grid instance.
-        """
         return f'{self.__class__.__name__} #{self.id_}({self.latitude}, ' \
             f'{self.longitude})'
 
