@@ -1,8 +1,9 @@
 import asyncio
+import itertools
 import logging
 import typing as t
 from concurrent import futures
-from operator import attrgetter
+from operator import attrgetter, itemgetter
 
 import numpy as np
 import psutil
@@ -74,13 +75,27 @@ class Processor:
         self.index = data.Index(self.data_set.grids)
         self.index.build_index()
 
+    @staticmethod
+    def _start_grid_seeds(grid: data.Grid) -> data.Grid:
+        end_grids = list(filter(attrgetter('seed'), grid.end_grids()))
+        seeds = list(map(attrgetter('seed'), end_grids))
+        for seed in seeds:
+            pop_grid = grid.sieve(seed, get_parent=True)
+            if not pop_grid:
+                continue
+            logger.info("Seed %s PoP: %s", seed, pop_grid)
+        return grid
+
     @util.timeit
-    def find_subdivided_neighbors(self):
+    def start_seeds(self):
         if self.index is None:
             return
-        grids = [[g, list(filter(attrgetter('seed'), g.get_terminals()))]
-                 for g in self.data_set.grids]
-        print(list(grids))
+        new_grids = self.wait(self.execute_many(
+            self._start_grid_seeds,
+            ([g] for g in self.data_set.grids)))
+        self.data_set.grids = new_grids
+        self.index = data.Index(self.data_set.grids)
+        self.index.build_index()
 
     @util.timeit
     def draw_map(
@@ -100,18 +115,15 @@ class Processor:
                 return True
 
             all_grids = filter(_grid_filter, self.data_set.grids)
-        grids, points, segments = [], None, []
+        grids, points, segments = [], ([], []), []
         for grid in all_grids:
             g, new_points, s = m.generate_data(grid)
             grids.extend(g)
             if new_points:
                 x, y = new_points
-                if points is None:
-                    points = x, y
-                else:
-                    old_x, old_y = points
-                    points = (np.concatenate((old_x, x)),
-                              np.concatenate((old_y, y)))
+                old_x, old_y = points
+                points = (np.concatenate((old_x, x)),
+                          np.concatenate((old_y, y)))
             segments.extend(s)
         m.draw_data(grids, points, segments)
         return m
@@ -121,14 +133,20 @@ class Processor:
         graph.Map.show()
 
 
-if __name__ == "__main__":
-    target_path = util.get_relative_path(__file__, "../data/world.tsp")
+@util.timeit
+def main(show_map: bool = False):
+    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()
-    processor.find_subdivided_neighbors()
-    processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
-                                         0.0, -90.0),
-                       b=data.IndexEntry(data.IndexEntry.numbers.next(),
-                                         -60.0, -50.0))
-    processor.show()
+    processor.start_seeds()
+    if show_map:
+        processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                             0.0, -90.0),
+                           b=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                             -60.0, -50.0))
+        processor.show()
+
+
+if __name__ == "__main__":
+    main(True)

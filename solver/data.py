@@ -55,7 +55,7 @@ class IndexEntry(GeoPoint):
 
     @property
     def coords(self) -> Coords:
-        return xy(self.latitude, self.longitude)
+        return self.latitude, self.longitude
 
     @property
     def map_coords(self) -> Coords:
@@ -112,7 +112,7 @@ class Segment:
     ):
         self.id_ = IndexEntry.numbers.next()
         self._endpoints = frozenset((Segment.Pointer(self, entry1),
-                                    Segment.Pointer(self, entry2)))
+                                     Segment.Pointer(self, entry2)))
         self.distance = distance
 
     def __hash__(self):
@@ -135,9 +135,6 @@ class Segment:
         return [a.map_coords, b.map_coords]
 
 
-Distance = t.Tuple[IndexEntry, float]
-
-
 class Point(IndexEntry):
     duplicates: t.List['Point']
 
@@ -152,6 +149,7 @@ class Point(IndexEntry):
 
 
 Indexable = t.Union[IndexEntry, Segment]
+Distance = t.Tuple[Indexable, float]
 
 
 class Index:
@@ -165,14 +163,19 @@ class Index:
         contents: t.List[Indexable],
         precision: int = constants.DEFAULT_PRECISION
     ):
-        self.set_contents(contents)
         self.set_precision(precision)
+        self.set_contents(contents)
 
     def set_precision(self, precision):
         if precision not in GEO_HASH_GRID_SIZE:
             self.precision = constants.MIN_PRECISION
         else:
             self.precision = precision
+        self.indexed = False
+        self.index = None
+
+    def append(self, *entry: Indexable):
+        self.contents.extend(entry)
         self.indexed = False
         self.index = None
 
@@ -203,7 +206,7 @@ class Index:
             self.build_index()
             try:
                 points = sorted(
-                    filter(lambda n: n[1] > 0.0,
+                    filter(itemgetter(1),
                            self.index.get_nearest_points(
                                target, self._search_radius())),
                     key=itemgetter(1))
@@ -220,7 +223,6 @@ class Index:
 
 class Grid(IndexEntry, Index):
     radius: float
-    subdivided: bool
     depth: int
     seed: t.Optional[IndexEntry]
 
@@ -232,19 +234,25 @@ class Grid(IndexEntry, Index):
         radius: float = constants.INITIAL_RADIUS,
         depth: int = 0
     ):
-        self.subdivided = False
+        self.seed = None
         self.radius = radius
         self.depth = depth
         super().__init__(self.numbers.next(), latitude, longitude)
         self.set_contents(contents)
         self.set_precision(constants.DEFAULT_PRECISION)
-        self.seed = None
 
     def __repr__(self):
         return f'{self.__class__.__name__} #{self.id_}[{self.depth}]' \
             f'({self.latitude}, {self.longitude})'
 
     __str__ = __repr__
+
+    @property
+    def terminal(self) -> bool:
+        for e in self.contents:
+            if not isinstance(e, Grid):
+                return True
+        return False
 
     def sub_quadrants(self) -> (t.Tuple[float, t.Tuple[Coords,
                                                        Coords,
@@ -271,8 +279,6 @@ class Grid(IndexEntry, Index):
                 (lon1, lat2)]
 
     def subdivide(self):
-        if self.subdivided:
-            return
         point_count = len(self.contents)
         if point_count <= constants.MAX_GRID_DENSITY:
             if point_count == 1:
@@ -296,20 +302,35 @@ class Grid(IndexEntry, Index):
             if isinstance(c, Grid):
                 c.subdivide()
         self.set_contents(new_contents)
-        self.subdivided = True
 
-    def get_terminals(self):
-        if not self.subdivided:
-            return [self]
-        return itertools.chain.from_iterable((c.get_terminals()
-                                              for c in self.contents
-                                              if isinstance(c, Grid)))
+    def end_grids(self) -> t.Iterable['Grid']:
+        grids: t.List[Grid] = list(filter(lambda g: isinstance(g, Grid),
+                                          self.contents))
+        terminal_grids = list(filter(lambda g: g.terminal, grids))
+        return itertools.chain(
+            terminal_grids, itertools.chain.from_iterable((
+                c.end_grids() for c in grids)))
 
-    def get_nearest(
-        self, target: IndexEntry,
-        resize: bool = True
-    ) -> t.List[Distance]:
-        return self.index.get_nearest(target, resize=resize)
+    def __contains__(self, item):
+        return item in self.contents
+
+    def sieve(
+        self,
+        entry: IndexEntry,
+        get_parent: bool = False,
+    ) -> t.Optional['Grid']:
+        if entry in self:
+            return self
+        _, quadrant_coords = self.sub_quadrants()
+        coords = quadrant_coords[self.quandrant_bearing(entry)]
+        next_grid = next(filter(lambda ng: isinstance(ng, Grid) and
+                                           ng.coords == coords,
+                                self.contents),None)
+        if not next_grid:
+            return None
+        if get_parent and entry in next_grid:
+            return self
+        return next_grid.sieve(entry)
 
 
 class DataSet:
