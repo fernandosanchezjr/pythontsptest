@@ -99,7 +99,7 @@ class Map:
         terminals = []
         points = []
         segments = []
-        for terminal in grid.end_grids():
+        for terminal in grid.terminals():
             terminals.append(self.grid_to_map(terminal))
             for entry in terminal.contents:
                 if isinstance(entry, data.Point):

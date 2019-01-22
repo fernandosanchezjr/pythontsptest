@@ -77,13 +77,26 @@ class Processor:
 
     @staticmethod
     def _start_grid_seeds(grid: data.Grid) -> data.Grid:
-        end_grids = list(filter(attrgetter('seed'), grid.end_grids()))
-        seeds = list(map(attrgetter('seed'), end_grids))
+        terminals = list(filter(attrgetter('seed'), grid.terminals()))
+        seeds: t.List[data.IndexEntry] = list(map(attrgetter('seed'),
+                                                  terminals))
         for seed in seeds:
-            pop_grid = grid.sieve(seed, get_parent=True)
+            pop_grid = grid.sieve(seed, get_pop=True)
             if not pop_grid:
                 continue
-            logger.info("Seed %s PoP: %s", seed, pop_grid)
+            endpoints = list(filter(lambda e: e != seed, pop_grid.endpoints()))
+            index = data.Index(endpoints)
+            nearest = index.get_nearest(seed,
+                                        min_count=constants.SEED_DISTANCES)
+            nearest = nearest[:constants.SEED_DISTANCES]
+            if nearest:
+                parent = pop_grid.sieve(seed)
+                if len(parent.contents) == 1:
+                    pop_grid.set_contents(list(filter(lambda c: c != parent,
+                                                      pop_grid.contents)))
+                pop_grid.append(*[seed.segment_to(target, distance)
+                                  for target, distance in nearest])
+                logger.info("Seed %s PoP: %s", seed, pop_grid)
         return grid
 
     @util.timeit

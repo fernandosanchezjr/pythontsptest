@@ -200,7 +200,8 @@ class Index:
 
     def get_nearest(
         self, target: IndexEntry,
-        resize: bool = True
+        resize: bool = True,
+        min_count: int = constants.MIN_RESULT_COUNT,
     ) -> t.List[Distance]:
         while True:
             self.build_index()
@@ -214,11 +215,14 @@ class Index:
                 points = []
             if not resize:
                 return points
-            elif (len(points) >= constants.MIN_RESULT_COUNT or
+            elif (len(points) >= min_count or
                   self.precision == constants.MIN_PRECISION):
                 return points
             else:
                 self.set_precision(self.precision - 1)
+
+
+GridContent = t.Union[Point, Segment]
 
 
 class Grid(IndexEntry, Index):
@@ -248,7 +252,7 @@ class Grid(IndexEntry, Index):
     __str__ = __repr__
 
     @property
-    def terminal(self) -> bool:
+    def is_ending(self) -> bool:
         for e in self.contents:
             if not isinstance(e, Grid):
                 return True
@@ -303,13 +307,19 @@ class Grid(IndexEntry, Index):
                 c.subdivide()
         self.set_contents(new_contents)
 
-    def end_grids(self) -> t.Iterable['Grid']:
+    def terminals(self) -> t.Iterable['Grid']:
         grids: t.List[Grid] = list(filter(lambda g: isinstance(g, Grid),
                                           self.contents))
-        terminal_grids = list(filter(lambda g: g.terminal, grids))
+        terminal_grids = list(filter(lambda g: g.is_ending, grids))
         return itertools.chain(
             terminal_grids, itertools.chain.from_iterable((
-                c.end_grids() for c in grids)))
+                c.terminals() for c in grids)))
+
+    def endpoints(self) -> t.Iterable[GridContent]:
+        grids = list(self.terminals())
+        return itertools.chain(
+            filter(lambda c: not isinstance(c, Grid), self.contents),
+            itertools.chain.from_iterable((c.endpoints() for c in grids)))
 
     def __contains__(self, item):
         return item in self.contents
@@ -317,18 +327,18 @@ class Grid(IndexEntry, Index):
     def sieve(
         self,
         entry: IndexEntry,
-        get_parent: bool = False,
+        get_pop: bool = False,
     ) -> t.Optional['Grid']:
         if entry in self:
             return self
         _, quadrant_coords = self.sub_quadrants()
         coords = quadrant_coords[self.quandrant_bearing(entry)]
-        next_grid = next(filter(lambda ng: isinstance(ng, Grid) and
-                                           ng.coords == coords,
-                                self.contents),None)
+        next_grid: t.Optional[Grid] = next(filter(
+            lambda ng: isinstance(ng, Grid) and ng.coords == coords,
+            self.contents), None)
         if not next_grid:
             return None
-        if get_parent and entry in next_grid:
+        if get_pop and entry in next_grid:
             return self
         return next_grid.sieve(entry)
 
