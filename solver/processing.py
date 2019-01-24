@@ -1,9 +1,8 @@
 import asyncio
-import itertools
 import logging
 import typing as t
 from concurrent import futures
-from operator import attrgetter, itemgetter
+from operator import attrgetter
 
 import numpy as np
 import psutil
@@ -80,23 +79,36 @@ class Processor:
         terminals = list(filter(attrgetter('seed'), grid.terminals()))
         seeds: t.List[data.IndexEntry] = list(map(attrgetter('seed'),
                                                   terminals))
+        index = data.Index(list(grid.endpoints()))
         for seed in seeds:
-            pop_grid = grid.sieve(seed, get_pop=True)
-            if not pop_grid:
-                continue
-            endpoints = list(filter(lambda e: e != seed, pop_grid.endpoints()))
-            index = data.Index(endpoints)
             nearest = index.get_nearest(seed,
                                         min_count=constants.SEED_DISTANCES)
-            nearest = nearest[:constants.SEED_DISTANCES]
-            if nearest:
-                parent = pop_grid.sieve(seed)
-                if len(parent.contents) == 1:
-                    pop_grid.set_contents(list(filter(lambda c: c != parent,
-                                                      pop_grid.contents)))
-                pop_grid.append(*[seed.segment_to(target, distance)
-                                  for target, distance in nearest])
-                logger.info("Seed %s PoP: %s", seed, pop_grid)
+            if not nearest:
+                continue
+            parent, parent_path = grid.sieve(seed)
+            if not parent:
+                logger.info("Could not find parent for %s", seed)
+                continue
+            for other, distance in nearest:
+                other_parent, other_path = grid.sieve(other)
+                if not other_parent:
+                    logger.info("Could not find other parent for %s", other)
+                    continue
+                prefix, remainders = data.common_path(parent_path, other_path)
+                if not prefix:
+                    logger.info("No common prefix between %s and %s",
+                                parent_path, other_path)
+                    continue
+                pass
+                # existing_segments = list(map(lambda f: f.raw_endpoints, filter(
+                #     lambda e: isinstance(e, data.Segment), grid.contents)))
+                # new_segments = [seed.segment_to(target, distance)
+                #                  for target, distance in nearest)]
+                #                 # if s.raw_endpoints not in existing_segments]
+                # for s in new_segments:
+                #     pop = grid.sieve(
+                # grid.append(*new_segments)
+                # logger.info("Seed %s PoP: %s", seed, grid)
         return grid
 
     @util.timeit

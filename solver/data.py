@@ -47,6 +47,11 @@ class IndexEntry(GeoPoint):
     def __hash__(self) -> int:
         return self.id_
 
+    def __eq__(self, other):
+        if isinstance(other, Segment.Pointer):
+            return self.id_ == other.id_
+        return super().__eq__(other)
+
     def __repr__(self):
         return f'{self.__class__.__name__} #{self.id_}({self.latitude}, ' \
             f'{self.longitude})'
@@ -73,67 +78,6 @@ class IndexEntry(GeoPoint):
             else:
                 return constants.Quadrant.Q_III
 
-    def segment_to(self, to: 'IndexEntry', distance: float) -> 'Segment':
-        return Segment(self, to, distance)
-
-
-class Segment:
-    id_: int
-    _endpoints: t.Set[IndexEntry]
-    distance: float
-
-    class Pointer(IndexEntry):
-        segment: 'Segment'
-        entry: IndexEntry
-
-        # noinspection PyMissingConstructor
-        def __init__(self, segment: 'Segment', entry: IndexEntry):
-            self.__dict__['segment'] = segment
-            self.__dict__['entry'] = entry
-
-        def __getstate__(self):
-            return self.__dict__
-
-        def __setstate__(self, state):
-            self.__dict__ = state
-
-        def __getattr__(self, item):
-            return (getattr(self.entry, item, None) or
-                    getattr(self.segment, item, None))
-
-        def segment_to(self, to: 'IndexEntry', distance: float) -> 'Segment':
-            return Segment(self.__dict__['entry'], to, distance)
-
-    def __init__(
-        self,
-        entry1: IndexEntry,
-        entry2: IndexEntry,
-        distance: float
-    ):
-        self.id_ = IndexEntry.numbers.next()
-        self._endpoints = frozenset((Segment.Pointer(self, entry1),
-                                     Segment.Pointer(self, entry2)))
-        self.distance = distance
-
-    def __hash__(self):
-        return self.id_
-
-    @property
-    def endpoints(self):
-        return tuple(iter(self._endpoints))
-
-    def __repr__(self):
-        return f'{self.__class__.__name__} #{self.id_}(' \
-            f'{self.endpoints[0]} -> {self.endpoints[1]} ' \
-            f'distance={self.distance})'
-
-    __str__ = __repr__
-
-    @property
-    def map_endpoints(self) -> t.List[Coords]:
-        a, b = self.endpoints
-        return [a.map_coords, b.map_coords]
-
 
 class Point(IndexEntry):
     duplicates: t.List['Point']
@@ -146,6 +90,76 @@ class Point(IndexEntry):
         if duplicates:
             self.duplicates.extend(duplicates)
         return self
+
+    def segment_to(self, to: 'Point', distance: float) -> 'Segment':
+        return Segment(self, to, distance)
+
+
+class Segment:
+    id_: int
+    raw_endpoints: t.Set[IndexEntry]
+    distance: float
+
+    class Pointer(Point):
+        segment: 'Segment'
+
+        # noinspection PyMissingConstructor
+        def __init__(self, segment: 'Segment', point: Point):
+            self.id_ = self.numbers.next()
+            self.duplicates = point.duplicates
+            self.latitude = point.latitude
+            self.longitude = point.longitude
+            self._rad_latitude = point._rad_latitude
+            self._rad_longitude = point._rad_longitude
+            self.segment = segment
+
+        def segment_to(self, to: Point, distance: float) -> 'Segment':
+            return Segment(self, to, distance)
+
+        def __hash__(self) -> int:
+            return self.id_
+
+        def __eq__(self, other):
+            if isinstance(other, Segment):
+                return self in other.raw_endpoints
+            if isinstance(other, Point):
+                return self.id_ == other.id_
+            return super().__eq__(other)
+
+    def __init__(
+        self,
+        entry1: Point,
+        entry2: Point,
+        distance: float
+    ):
+        self.id_ = IndexEntry.numbers.next()
+        self.raw_endpoints = frozenset((Segment.Pointer(self, entry1),
+                                        Segment.Pointer(self, entry2)))
+        self.distance = distance
+
+    def __hash__(self):
+        return self.id_
+
+    def __eq__(self, other):
+        if isinstance(other, Segment.Pointer):
+            return other in self.raw_endpoints
+        return super().__eq__(other)
+
+    @property
+    def endpoints(self):
+        return tuple(iter(self.raw_endpoints))
+
+    def __repr__(self):
+        return f'{self.__class__.__name__} #{self.id_}(' \
+            f'{self.endpoints[0]} -> {self.endpoints[1]} ' \
+            f'distance={self.distance})'
+
+    __str__ = __repr__
+
+    @property
+    def map_endpoints(self) -> t.List[Coords]:
+        a, b = self.endpoints
+        return [a.map_coords, b.map_coords]
 
 
 Indexable = t.Union[IndexEntry, Segment]
@@ -186,6 +200,9 @@ class Index:
         self.contents = contents
         self.index = None
         self.indexed = False
+
+    def remove_content(self, entry: Indexable):
+        self.set_contents(list(filter(lambda c: c == entry, self.contents)))
 
     def build_index(self):
         if not self.indexed:
@@ -250,6 +267,14 @@ class Grid(IndexEntry, Index):
             f'({self.latitude}, {self.longitude})'
 
     __str__ = __repr__
+
+    def __hash__(self) -> int:
+        return self.id_
+
+    def __eq__(self, other):
+        if isinstance(other, Grid):
+            return self.id_ == other.id_
+        return super().__eq__(other)
 
     @property
     def is_ending(self) -> bool:
@@ -321,26 +346,36 @@ class Grid(IndexEntry, Index):
             filter(lambda c: not isinstance(c, Grid), self.contents),
             itertools.chain.from_iterable((c.endpoints() for c in grids)))
 
+    def find(self, func: t.Callable[[Indexable], bool]) -> Indexable:
+        return next(filter(func, self.contents), None)
+
+    def filter(
+        self,
+        func: t.Callable[[Indexable], bool]
+    ) -> t.Iterator[Indexable]:
+        return filter(func, self.contents)
+
     def __contains__(self, item):
-        return item in self.contents
+        return self.find(lambda c: c == item) is not None
 
     def sieve(
         self,
-        entry: IndexEntry,
-        get_pop: bool = False,
-    ) -> t.Optional['Grid']:
+        entry: IndexEntry
+    ) -> t.Tuple[t.Optional['Grid'], t.List['Grid']]:
         if entry in self:
-            return self
+            return entry, [self]
         _, quadrant_coords = self.sub_quadrants()
         coords = quadrant_coords[self.quandrant_bearing(entry)]
-        next_grid: t.Optional[Grid] = next(filter(
-            lambda ng: isinstance(ng, Grid) and ng.coords == coords,
-            self.contents), None)
+        next_grid: t.Optional[Grid] = next(self.filter(
+            lambda ng: isinstance(ng, Grid) and ng.coords == coords), None)
         if not next_grid:
-            return None
-        if get_pop and entry in next_grid:
-            return self
-        return next_grid.sieve(entry)
+            return None, [self]
+        target, route = next_grid.sieve(entry)
+        return target, [self] + route
+
+    @property
+    def empty(self):
+        return len(self.contents) == 0
 
 
 class DataSet:
@@ -399,6 +434,15 @@ class DataSet:
                                            key=itemgetter(1))
         return [Grid(lat, lon, list(map(itemgetter(0), points)))
                 for (lat, lon), points in grouped_points]
+
+
+def common_path(*paths: t.List[Grid]) -> t.Tuple[t.List[Grid],
+                                                 t.List[t.List[Grid]]]:
+    prefix = list(map(itemgetter(0),
+                      itertools.takewhile(lambda x: all(x[0] == y for y in x),
+                                          zip(*paths))))
+    remainders = [p[len(prefix):] for p in paths]
+    return prefix, remainders
 
 
 if __name__ == "__main__":
