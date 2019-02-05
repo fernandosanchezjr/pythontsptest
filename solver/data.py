@@ -143,6 +143,8 @@ class Segment:
     def __eq__(self, other):
         if isinstance(other, Segment.Pointer):
             return other in self.raw_endpoints
+        elif isinstance(other, Segment):
+            return self.raw_endpoints == other.raw_endpoints
         return super().__eq__(other)
 
     @property
@@ -162,8 +164,9 @@ class Segment:
         return [a.map_coords, b.map_coords]
 
 
+Pointable = t.Union[Point, Segment.Pointer]
 Indexable = t.Union[IndexEntry, Segment]
-Distance = t.Tuple[Indexable, float]
+Distance = t.Tuple[Pointable, float]
 
 
 class Index:
@@ -216,7 +219,7 @@ class Index:
             self.indexed = True
 
     def get_nearest(
-        self, target: IndexEntry,
+        self, target: Pointable,
         resize: bool = True,
         min_count: int = constants.MIN_RESULT_COUNT,
     ) -> t.List[Distance]:
@@ -245,7 +248,7 @@ GridContent = t.Union[Point, Segment]
 class Grid(IndexEntry, Index):
     radius: float
     depth: int
-    seed: t.Optional[IndexEntry]
+    seed: t.Optional[Point]
 
     def __init__(
         self,
@@ -263,8 +266,8 @@ class Grid(IndexEntry, Index):
         self.set_precision(constants.DEFAULT_PRECISION)
 
     def __repr__(self):
-        return f'{self.__class__.__name__} #{self.id_}[{self.depth}]' \
-            f'({self.latitude}, {self.longitude})'
+        return (f'{self.__class__.__name__} #{self.id_}[{self.depth}]'
+                f'({self.latitude}, {self.longitude})')
 
     __str__ = __repr__
 
@@ -361,7 +364,7 @@ class Grid(IndexEntry, Index):
     def sieve(
         self,
         entry: IndexEntry
-    ) -> t.Tuple[t.Optional['Grid'], t.List['Grid']]:
+    ) -> t.Tuple[t.Optional[IndexEntry], t.List['Grid']]:
         if entry in self:
             return entry, [self]
         _, quadrant_coords = self.sub_quadrants()

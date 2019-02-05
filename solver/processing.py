@@ -44,23 +44,6 @@ class Processor:
         return await asyncio.wait(tasks)
 
     @staticmethod
-    def _find_grid_neighbors(grid: data.Grid) -> data.Grid:
-        if len(grid.contents) <= 1:
-            return grid
-        for point in grid.contents:
-            nearest = grid.get_nearest(point)
-            logger.info("Nearest to %s in %s: %s", point, grid, nearest)
-        logger.info("%s processed", grid)
-        return grid
-
-    @util.timeit
-    def find_grid_neighbors(self):
-        result_grids = self.wait(self.execute_many(
-            self._find_grid_neighbors,
-            ([g] for g in self.data_set.grids)))
-        self.data_set.grids = result_grids
-
-    @staticmethod
     def _subdivide(grid: data.Grid) -> data.Grid:
         grid.subdivide()
         return grid
@@ -77,38 +60,22 @@ class Processor:
     @staticmethod
     def _start_grid_seeds(grid: data.Grid) -> data.Grid:
         terminals = list(filter(attrgetter('seed'), grid.terminals()))
-        seeds: t.List[data.IndexEntry] = list(map(attrgetter('seed'),
-                                                  terminals))
+        seeds: t.List[data.Point] = list(map(attrgetter('seed'),
+                                             terminals))
         index = data.Index(list(grid.endpoints()))
         for seed in seeds:
             nearest = index.get_nearest(seed,
                                         min_count=constants.SEED_DISTANCES)
-            if not nearest:
+            nearest_segments = []
+            for target, distance in nearest:
+                nearest_segments.append(seed.segment_to(target, distance))
+                if len(nearest_segments) > constants.MIN_RESULT_COUNT:
+                    break
+            if not nearest_segments:
                 continue
-            parent, parent_path = grid.sieve(seed)
-            if not parent:
-                logger.info("Could not find parent for %s", seed)
-                continue
-            for other, distance in nearest:
-                other_parent, other_path = grid.sieve(other)
-                if not other_parent:
-                    logger.info("Could not find other parent for %s", other)
-                    continue
-                prefix, remainders = data.common_path(parent_path, other_path)
-                if not prefix:
-                    logger.info("No common prefix between %s and %s",
-                                parent_path, other_path)
-                    continue
-                pass
-                # existing_segments = list(map(lambda f: f.raw_endpoints, filter(
-                #     lambda e: isinstance(e, data.Segment), grid.contents)))
-                # new_segments = [seed.segment_to(target, distance)
-                #                  for target, distance in nearest)]
-                #                 # if s.raw_endpoints not in existing_segments]
-                # for s in new_segments:
-                #     pop = grid.sieve(
-                # grid.append(*new_segments)
-                # logger.info("Seed %s PoP: %s", seed, grid)
+            index.remove_content(seed)
+            logger.info("Nearest to %s:\n%s", seed, nearest_segments)
+
         return grid
 
     @util.timeit
@@ -160,7 +127,7 @@ class Processor:
 
 @util.timeit
 def main(show_map: bool = False):
-    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
+    target_path = util.get_relative_path(__file__, "../data/world.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()
@@ -174,4 +141,4 @@ def main(show_map: bool = False):
 
 
 if __name__ == "__main__":
-    main(True)
+    main(False)
