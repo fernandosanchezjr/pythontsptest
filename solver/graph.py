@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 GridCoords = t.List[PolyCollection]
 PointCoords = t.Optional[t.Tuple[t.Any, t.Any]]
-SegmentCoords = t.Optional[LineCollection]
+SegmentCoords = t.List[t.List[data.Coords]]
 MapData = t.Tuple[GridCoords, PointCoords, SegmentCoords]
 
 
@@ -59,10 +59,14 @@ class Map:
                      zorder=3.0)
 
     @staticmethod
-    def plot_segments(segments: t.Optional[LineCollection]):
+    def plot_segments(segments: SegmentCoords):
         if segments:
             gca = plt.gca()
-            gca.add_collection(segments)
+            gca.add_collection(LineCollection(segments, colors='green',
+                                              linewidths=0.75,
+                                              linestyles='solid', zorder=4))
+
+        return
 
     def grid_to_map(self, grid) -> PolyCollection:
         return PolyCollection(np.dstack(self.to_map_xy(grid.bounds())),
@@ -72,28 +76,21 @@ class Map:
     def points_to_map(
         self,
         points: t.List[data.Point]
-    ) -> t.Optional[t.Tuple[t.Any, t.Any]]:
+    ) -> PointCoords:
         if not points:
             return None
         return self.to_map_xy([p.map_coords for p in points])
 
-    def endpoint_to_map(
-        self,
-        endpoints: t.List[data.Coords]
-    ) -> t.List[data.Coords]:
-        return list(np.dstack(self.to_map_xy(endpoints)))
-
     def segments_to_map(
         self,
         segments: t.List[data.Segment]
-    ) -> t.Optional[LineCollection]:
+    ) -> SegmentCoords:
         if not segments:
-            return None
+            return []
         lines = []
         for s in segments:
             lines.extend(np.dstack(self.to_map_xy(s.map_endpoints)))
-        return LineCollection(lines, colors='green', linewidths=0.75,
-                              linestyles='solid', zorder=4)
+        return lines
 
     def generate_data(
         self,
@@ -102,7 +99,7 @@ class Map:
         terminals = []
         points = []
         segments = []
-        for terminal in grid.get_terminals():
+        for terminal in grid.terminals():
             terminals.append(self.grid_to_map(terminal))
             for entry in terminal.contents:
                 if isinstance(entry, data.Point):

@@ -2,7 +2,9 @@ import asyncio
 import logging
 import typing as t
 from concurrent import futures
+from operator import attrgetter
 
+import numpy as np
 import psutil
 
 from solver import constants, data, graph, util
@@ -42,23 +44,6 @@ class Processor:
         return await asyncio.wait(tasks)
 
     @staticmethod
-    def _find_grid_neighbors(grid: data.Grid) -> data.Grid:
-        if len(grid.contents) <= 1:
-            return grid
-        for point in grid.contents:
-            nearest = grid.get_nearest(point)
-            logger.info("Nearest to %s in %s: %s", point, grid, nearest)
-        logger.info("%s processed", grid)
-        return grid
-
-    @util.timeit
-    def find_grid_neighbors(self):
-        result_grids = self.wait(self.execute_many(
-            self._find_grid_neighbors,
-            ([g] for g in self.data_set.grids)))
-        self.data_set.grids = result_grids
-
-    @staticmethod
     def _subdivide(grid: data.Grid) -> data.Grid:
         grid.subdivide()
         return grid
@@ -72,12 +57,38 @@ class Processor:
         self.index = data.Index(self.data_set.grids)
         self.index.build_index()
 
+    @staticmethod
+    def _start_grid_seeds(grid: data.Grid) -> data.Grid:
+        terminals = list(filter(attrgetter('seed'), grid.terminals()))
+        seeds: t.List[data.Point] = list(map(attrgetter('seed'),
+                                             terminals))
+        index = data.Index(list(grid.endpoints()))
+        for seed in seeds:
+            nearest = index.get_nearest(seed,
+                                        min_count=constants.SEED_DISTANCES)
+            nearest_segments = []
+            for target, distance in nearest:
+                nearest_segments.append(seed.segment_to(target, distance))
+                if (not isinstance(target, data.Segment.Pointer) and
+                   len(nearest_segments) > constants.MIN_RESULT_COUNT):
+                    break
+            if not nearest_segments:
+                continue
+            _, route = grid.sieve(seed)
+            new_route = data.remove_nested_entry(route, seed)
+            new_route[-1].append(*nearest_segments)
+        return grid
+
     @util.timeit
-    def find_subdivided_neighbors(self):
+    def start_seeds(self):
         if self.index is None:
             return
-        # for grid in self.data_set.grids:
-        #     print(grid)
+        new_grids = self.wait(self.execute_many(
+            self._start_grid_seeds,
+            ([g] for g in self.data_set.grids)))
+        self.data_set.grids = new_grids
+        self.index = data.Index(self.data_set.grids)
+        self.index.build_index()
 
     @util.timeit
     def draw_map(
@@ -86,9 +97,8 @@ class Processor:
         b: t.Optional[data.IndexEntry] = None
     ) -> graph.Map:
         m = graph.Map(f"{self.data_set.name} map")
-        grids = self.data_set.grids
+        all_grids = self.data_set.grids
         if a or b:
-
             def _grid_filter(fg: data.Grid) -> bool:
                 if a and a.quandrant_bearing(fg) != constants.Quadrant.Q_IV:
                     return False
@@ -96,9 +106,18 @@ class Processor:
                     return False
                 return True
 
-            grids = filter(_grid_filter, self.data_set.grids)
-        for grid in grids:
-            m.draw_data(*m.generate_data(grid))
+            all_grids = filter(_grid_filter, self.data_set.grids)
+        grids, points, segments = [], ([], []), []
+        for grid in all_grids:
+            g, new_points, s = m.generate_data(grid)
+            grids.extend(g)
+            if new_points:
+                x, y = new_points
+                old_x, old_y = points
+                points = (np.concatenate((old_x, x)),
+                          np.concatenate((old_y, y)))
+            segments.extend(s)
+        m.draw_data(grids, points, segments)
         return m
 
     @staticmethod
@@ -106,14 +125,20 @@ class Processor:
         graph.Map.show()
 
 
-if __name__ == "__main__":
+@util.timeit
+def main(show_map: bool = False):
     target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()
-    processor.find_subdivided_neighbors()
-    processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
-                                         0.0, -90.0),
-                       b=data.IndexEntry(data.IndexEntry.numbers.next(),
-                                         -60.0, -50.0))
-    processor.show()
+    processor.start_seeds()
+    if show_map:
+        processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                             0.0, -90.0),
+                           b=data.IndexEntry(data.IndexEntry.numbers.next(),
+                                             -60.0, -50.0))
+        processor.show()
+
+
+if __name__ == "__main__":
+    main(True)
