@@ -81,9 +81,11 @@ class IndexEntry(GeoPoint):
 
 class Point(IndexEntry):
     duplicates: t.List['Point']
+    depth: int
 
     def __init__(self, id_: int, latitude: float, longitude: float):
         self.duplicates = []
+        self.depth = -1
         super().__init__(id_, latitude, longitude)
 
     def merge_duplicates(self, duplicates: t.List['Point']) -> 'Point':
@@ -99,6 +101,7 @@ class Segment:
     id_: int
     raw_endpoints: t.Set[IndexEntry]
     distance: float
+    depth: int
 
     class Pointer(Point):
         segment: 'Segment'
@@ -111,6 +114,7 @@ class Segment:
             self.longitude = point.longitude
             self._rad_latitude = point._rad_latitude
             self._rad_longitude = point._rad_longitude
+            self.depth = point.depth
             self.segment = segment
 
         def segment_to(self, to: Point, distance: float) -> 'Segment':
@@ -313,6 +317,8 @@ class Grid(IndexEntry, Index):
     def subdivide(self):
         point_count = len(self.contents)
         if point_count <= constants.MAX_GRID_DENSITY:
+            for entry in self.contents:
+                entry.depth = self.depth
             if point_count == 1:
                 self.seed = self.contents[0]
             elif point_count == 2:
