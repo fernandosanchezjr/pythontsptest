@@ -81,14 +81,25 @@ class Processor:
 
     @util.timeit
     def start_seeds(self):
-        if self.index is None:
-            return
         new_grids = self.wait(self.execute_many(
             self._start_grid_seeds,
             ([g] for g in self.data_set.grids)))
         self.data_set.grids = new_grids
-        self.index = data.Index(self.data_set.grids)
-        self.index.build_index()
+        self.index.set(self.data_set.grids)
+
+    @staticmethod
+    def _find_clusters(grid: data.Grid):
+        return grid
+
+    @util.timeit
+    def find_clusters(self):
+        if self.index is None:
+            return
+        new_grids = self.wait(self.execute_many(
+            self._find_clusters,
+            ([g] for g in self.data_set.grids)))
+        self.data_set.grids = new_grids
+        self.index.set(new_grids)
 
     @util.timeit
     def draw_map(
@@ -132,6 +143,7 @@ def main(show_map: bool = False):
     processor = Processor.create(target_path)
     processor.subdivide()
     processor.start_seeds()
+    processor.find_clusters()
     if show_map:
         processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
                                              0.0, -90.0),
