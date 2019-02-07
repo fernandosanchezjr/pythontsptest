@@ -69,13 +69,14 @@ class Processor:
             nearest_segments = []
             for target, distance in nearest:
                 nearest_segments.append(seed.segment_to(target, distance))
-                if len(nearest_segments) > constants.MIN_RESULT_COUNT:
+                if (not isinstance(target, data.Segment.Pointer) and
+                   len(nearest_segments) > constants.MIN_RESULT_COUNT):
                     break
             if not nearest_segments:
                 continue
-            index.remove_content(seed)
-            logger.info("Nearest to %s:\n%s", seed, nearest_segments)
-
+            _, route = grid.sieve(seed)
+            new_route = data.remove_nested_entry(route, seed)
+            new_route[-1].append(*nearest_segments)
         return grid
 
     @util.timeit
@@ -98,7 +99,6 @@ class Processor:
         m = graph.Map(f"{self.data_set.name} map")
         all_grids = self.data_set.grids
         if a or b:
-
             def _grid_filter(fg: data.Grid) -> bool:
                 if a and a.quandrant_bearing(fg) != constants.Quadrant.Q_IV:
                     return False
@@ -127,7 +127,7 @@ class Processor:
 
 @util.timeit
 def main(show_map: bool = False):
-    target_path = util.get_relative_path(__file__, "../data/world.tsp")
+    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
     logger.info("Loading %s", target_path)
     processor = Processor.create(target_path)
     processor.subdivide()
@@ -141,4 +141,4 @@ def main(show_map: bool = False):
 
 
 if __name__ == "__main__":
-    main(False)
+    main(True)

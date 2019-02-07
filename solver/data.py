@@ -181,7 +181,7 @@ class Index:
         precision: int = constants.DEFAULT_PRECISION
     ):
         self.set_precision(precision)
-        self.set_contents(contents)
+        self.set(contents)
 
     def set_precision(self, precision):
         if precision not in GEO_HASH_GRID_SIZE:
@@ -191,21 +191,21 @@ class Index:
         self.indexed = False
         self.index = None
 
-    def append(self, *entry: Indexable):
-        self.contents.extend(entry)
+    def append(self, *entries: Indexable):
+        self.contents.extend(entries)
         self.indexed = False
         self.index = None
 
     def _search_radius(self) -> float:
         return GEO_HASH_GRID_SIZE[self.precision] / 2.0
 
-    def set_contents(self, contents: t.List[Indexable]):
+    def set(self, contents: t.List[Indexable]):
         self.contents = contents
         self.index = None
         self.indexed = False
 
-    def remove_content(self, entry: Indexable):
-        self.set_contents(list(filter(lambda c: c == entry, self.contents)))
+    def remove(self, entry: Indexable):
+        self.set(list(filter(lambda c: c == entry, self.contents)))
 
     def build_index(self):
         if not self.indexed:
@@ -262,7 +262,7 @@ class Grid(IndexEntry, Index):
         self.radius = radius
         self.depth = depth
         super().__init__(self.numbers.next(), latitude, longitude)
-        self.set_contents(contents)
+        self.set(contents)
         self.set_precision(constants.DEFAULT_PRECISION)
 
     def __repr__(self):
@@ -318,7 +318,7 @@ class Grid(IndexEntry, Index):
             elif point_count == 2:
                 p1, p2 = self.contents
                 segment = p1.segment_to(p2, p1.distance_to(p2))
-                self.set_contents([segment])
+                self.set([segment])
             return
         new_radius, quadrant_coords = self.sub_quadrants()
         new_depth = self.depth + 1
@@ -333,7 +333,7 @@ class Grid(IndexEntry, Index):
         for c in new_contents:
             if isinstance(c, Grid):
                 c.subdivide()
-        self.set_contents(new_contents)
+        self.set(new_contents)
 
     def terminals(self) -> t.Iterable['Grid']:
         grids: t.List[Grid] = list(filter(lambda g: isinstance(g, Grid),
@@ -446,6 +446,22 @@ def common_path(*paths: t.List[Grid]) -> t.Tuple[t.List[Grid],
                                           zip(*paths))))
     remainders = [p[len(prefix):] for p in paths]
     return prefix, remainders
+
+
+def remove_nested_entry(
+    route: t.List[Grid],
+    entry: IndexEntry
+) -> t.List[Grid]:
+    reversed_path = reversed(route)
+    new_route = []
+    for grid in reversed_path:
+        if entry in grid:
+            grid.remove(entry)
+        if grid.empty:
+            entry = grid
+        else:
+            new_route.append(grid)
+    return list(reversed(new_route))
 
 
 if __name__ == "__main__":
