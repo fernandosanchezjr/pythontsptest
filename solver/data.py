@@ -222,6 +222,18 @@ class Index:
                         self.index.add_point(e)
             self.indexed = True
 
+    @staticmethod
+    def _deduplicate_segments(nearest: t.List[Distance]) -> t.List[Distance]:
+        dupes = set()
+        results = []
+        for entry, distance in nearest:
+            if isinstance(entry, Segment.Pointer):
+                if entry.segment.id_ in dupes:
+                    continue
+                dupes.add(entry.segment.id_)
+            results.append((entry, distance))
+        return results
+
     def get_nearest(
         self, target: Pointable,
         resize: bool = True,
@@ -238,10 +250,10 @@ class Index:
             except ValueError:
                 points = []
             if not resize:
-                return points
+                return self._deduplicate_segments(points)
             elif (len(points) >= min_count or
                   self.precision == constants.MIN_PRECISION):
-                return points
+                return self._deduplicate_segments(points)
             else:
                 self.set_precision(self.precision - 1)
 
