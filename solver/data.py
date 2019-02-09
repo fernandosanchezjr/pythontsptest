@@ -48,9 +48,9 @@ class IndexEntry(GeoPoint):
         return self.id_
 
     def __eq__(self, other):
-        if isinstance(other, Segment.Pointer):
+        if isinstance(other, IndexEntry):
             return self.id_ == other.id_
-        return super().__eq__(other)
+        return False
 
     def __repr__(self):
         return f'{self.__class__.__name__} #{self.id_}({self.latitude}, ' \
@@ -108,7 +108,7 @@ class Segment:
 
         # noinspection PyMissingConstructor
         def __init__(self, segment: 'Segment', point: Point):
-            self.id_ = self.numbers.next()
+            self.id_ = point.id_
             self.duplicates = point.duplicates
             self.latitude = point.latitude
             self.longitude = point.longitude
@@ -126,9 +126,9 @@ class Segment:
         def __eq__(self, other):
             if isinstance(other, Segment):
                 return self in other.raw_endpoints
-            if isinstance(other, Point):
+            if isinstance(other, IndexEntry):
                 return self.id_ == other.id_
-            return super().__eq__(other)
+            return False
 
     def __init__(
         self,
@@ -145,11 +145,11 @@ class Segment:
         return self.id_
 
     def __eq__(self, other):
-        if isinstance(other, Segment.Pointer):
-            return other in self.raw_endpoints
-        elif isinstance(other, Segment):
+        if isinstance(other, Segment):
             return self.raw_endpoints == other.raw_endpoints
-        return super().__eq__(other)
+        elif isinstance(other, IndexEntry):
+            return other in self.raw_endpoints
+        return False
 
     @property
     def endpoints(self):
@@ -281,7 +281,8 @@ class Grid(IndexEntry, Index):
     def __eq__(self, other):
         if isinstance(other, Grid):
             return self.id_ == other.id_
-        return super().__eq__(other)
+        return False
+
 
     @property
     def is_ending(self) -> bool:
