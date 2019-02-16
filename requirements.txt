@@ -2,6 +2,6 @@ geoindex==0.0.1
 psutil==5.4.8
 numpy
 matplotlib
-# -e git://github.com/matplotlib/basemap.git@v1.2.0rel#egg=basemap
-basemap
+# basemap
+-e git://github.com/matplotlib/basemap.git@v1.2.0rel#egg=basemap
 sympy==1.3
