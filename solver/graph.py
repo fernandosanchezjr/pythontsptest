@@ -106,6 +106,9 @@ class Map:
                     points.append(entry)
                 elif isinstance(entry, data.Segment):
                     segments.append(entry)
+                elif isinstance(entry, data.Cluster):
+                    points.extend(list(entry.points))
+                    segments.extend(list(entry.segments))
         return terminals, self.points_to_map(points), self.segments_to_map(
             segments)
 
