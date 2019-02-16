@@ -70,7 +70,7 @@ class Processor:
             for target, distance in nearest:
                 nearest_segments.append(seed.segment_to(target, distance))
                 if (not isinstance(target, data.Segment.Pointer) and
-                   len(nearest_segments) > constants.MIN_RESULT_COUNT):
+                        len(nearest_segments) > constants.MIN_RESULT_COUNT):
                     break
             if not nearest_segments:
                 continue
@@ -81,20 +81,45 @@ class Processor:
 
     @util.timeit
     def start_seeds(self):
-        if self.index is None:
-            return
         new_grids = self.wait(self.execute_many(
             self._start_grid_seeds,
             ([g] for g in self.data_set.grids)))
         self.data_set.grids = new_grids
-        self.index = data.Index(self.data_set.grids)
-        self.index.build_index()
+        self.index.set(self.data_set.grids)
+
+    @staticmethod
+    def _find_clusters(grid: data.Grid):
+        endpoints = {g.id_: g
+                     for g in grid.endpoints()}
+        clusters = []
+        while len(endpoints):
+            c = data.Cluster()
+            for e in list(endpoints.values()):
+                if c.empty():
+                    c.append(e)
+                    del endpoints[e.id_]
+                elif c.intersects(e):
+                    c.append(e)
+                    del endpoints[e.id_]
+            clusters.append(c)
+        grid.set(clusters)
+        return grid
+
+    @util.timeit
+    def find_clusters(self):
+        if self.index is None:
+            return
+        new_grids = self.wait(self.execute_many(
+            self._find_clusters,
+            ([g] for g in self.data_set.grids)))
+        self.data_set.grids = new_grids
+        self.index.set(new_grids)
 
     @util.timeit
     def draw_map(
-        self,
-        a: t.Optional[data.IndexEntry] = None,
-        b: t.Optional[data.IndexEntry] = None
+            self,
+            a: t.Optional[data.IndexPoint] = None,
+            b: t.Optional[data.IndexPoint] = None
     ) -> graph.Map:
         m = graph.Map(f"{self.data_set.name} map")
         all_grids = self.data_set.grids
@@ -132,10 +157,11 @@ def main(show_map: bool = False):
     processor = Processor.create(target_path)
     processor.subdivide()
     processor.start_seeds()
+    processor.find_clusters()
     if show_map:
-        processor.draw_map(a=data.IndexEntry(data.IndexEntry.numbers.next(),
+        processor.draw_map(a=data.IndexPoint(data.IndexPoint.numbers.next(),
                                              0.0, -90.0),
-                           b=data.IndexEntry(data.IndexEntry.numbers.next(),
+                           b=data.IndexPoint(data.IndexPoint.numbers.next(),
                                              -60.0, -50.0))
         processor.show()
 
