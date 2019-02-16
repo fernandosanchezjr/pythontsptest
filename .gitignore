@@ -2,3 +2,4 @@
 data/world.tsp
 log.txt
 *.png
+venv/
