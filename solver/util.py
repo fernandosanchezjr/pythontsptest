@@ -1,6 +1,6 @@
 import logging
-from os import path
 import time
+from os import path
 
 
 def setup_logging():
@@ -22,8 +22,8 @@ def timeit(method):
         ts = time.time()
         result = method(*args, **kw)
         te = time.time()
-        logging.debug("%s elapsed time: %f ms",
-                      method.__qualname__, (te - ts) * 1000)
+        logging.debug("%s elapsed time: %f sec",
+                      method.__qualname__, (te - ts))
         return result
     return timed
 

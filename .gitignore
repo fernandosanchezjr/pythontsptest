@@ -3,3 +3,6 @@ data/world.tsp
 log.txt
 *.png
 venv/
+.ipynb_checkpoints
+*.ipynb
+!notebooks/*.ipynb

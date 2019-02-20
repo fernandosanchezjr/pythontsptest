@@ -5,3 +5,5 @@ matplotlib
 # basemap
 -e git://github.com/matplotlib/basemap.git@v1.2.0rel#egg=basemap
 sympy==1.3
+jupyter
+nest-asyncio==1.0.0
