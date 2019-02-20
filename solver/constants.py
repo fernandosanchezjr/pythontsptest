@@ -1,5 +1,7 @@
 from enum import Enum
 
+DATA_FILE = "../data/ar9152.tsp"
+
 MIN_PRECISION = 1
 MIN_RESULT_COUNT = 2
 DEFAULT_PRECISION = 4

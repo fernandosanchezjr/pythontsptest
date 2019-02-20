@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sys
 import typing as t
 from concurrent import futures
 from operator import attrgetter
@@ -10,42 +11,50 @@ import psutil
 from solver import constants, data, graph, util
 
 logger = logging.getLogger(__name__)
+DEFAULT_DATA_FILE = util.get_relative_path(__file__, constants.DATA_FILE)
 
 
-def _execute(func: (), args_list: t.Iterable[t.Any]) -> t.Iterable[t.Any]:
-    return [func(arg) for arg in args_list]
+async def _processor(executor, queue, func: (), args_list: t.List[t.Any]):
+    for f in executor.map(func, args_list):
+        await queue.put(f)
+
+
+async def _consumer(queue, chunk_count: int):
+    completed_chunks = 0
+    results = [None] * chunk_count
+    while completed_chunks < chunk_count:
+        chunk = await queue.get()
+        results[completed_chunks] = chunk
+        completed_chunks += 1
+    return results
 
 
 class BaseProcessor:
-    _executor: futures.ThreadPoolExecutor
-    _loop: asyncio.events.AbstractEventLoop
     _executor_count: int
+    _executor: futures.ProcessPoolExecutor
+    _loop: asyncio.events.AbstractEventLoop
+    _queue: asyncio.Queue
     data_set: data.DataSet
     index: t.Optional[data.Index]
 
     def __init__(self, data_set: data.DataSet):
-        self._executor_count = psutil.cpu_count() - 1
+        self._executor_count = psutil.cpu_count() - 1 or 1
         p = psutil.Process()
         p.cpu_affinity(range(psutil.cpu_count()))
         self._executor = futures.ProcessPoolExecutor(
             max_workers=self._executor_count
         )
         self._loop = asyncio.get_event_loop()
+        self._queue = asyncio.Queue()
         self.data_set = data_set
         self.index = None
 
-    def wait(self, awaitable):
-        results, _ = self._loop.run_until_complete(awaitable)
-        return [r.result() for r in results]
-
-    async def execute(self, func: (), *args):
-        return await asyncio.wait(
-            [self._loop.run_in_executor(self._executor, func, *args)])
-
-    async def execute_many(self, func: (), args_list: t.Iterable[t.Any]):
-        tasks = [self._loop.run_in_executor(self._executor, func, arg)
-                 for arg in args_list]
-        return await asyncio.wait(tasks)
+    def process(self, func: (), args_list: t.List[t.Any]):
+        _, results = self._loop.run_until_complete(asyncio.gather(
+            _processor(self._executor, self._queue, func, args_list),
+            _consumer(self._queue, len(args_list))
+        ))
+        return results
 
 
 def _subdivide(grid: data.Grid) -> data.Grid:
@@ -101,28 +110,20 @@ class Processor(BaseProcessor):
 
     @util.timeit
     def subdivide(self):
-        new_grids = self.wait(self.execute_many(
-            _subdivide,
-            self.data_set.grids))
+        new_grids = self.process(_subdivide, self.data_set.grids)
         self.data_set.grids = new_grids
         self.index = data.Index(self.data_set.grids)
         self.index.build_index()
 
     @util.timeit
     def start_seeds(self):
-        new_grids = self.wait(self.execute_many(
-            _start_grid_seeds,
-            self.data_set.grids))
+        new_grids = self.process(_start_grid_seeds, self.data_set.grids)
         self.data_set.grids = new_grids
         self.index.set(self.data_set.grids)
 
     @util.timeit
     def find_clusters(self):
-        if self.index is None:
-            return
-        new_grids = self.wait(self.execute_many(
-            _find_clusters,
-            self.data_set.grids))
+        new_grids = self.process(_find_clusters, self.data_set.grids)
         self.data_set.grids = new_grids
         self.index.set(new_grids)
 
@@ -163,18 +164,17 @@ class Processor(BaseProcessor):
 
 @util.timeit
 def main(show_map: bool = False):
-    target_path = util.get_relative_path(__file__, "../data/ar9152.tsp")
+    target_path = sys.argv[1] if sys.argv[1:] else DEFAULT_DATA_FILE
     logger.info("Loading %s", target_path)
     proc = Processor.create(target_path)
     proc.subdivide()
     proc.start_seeds()
     proc.find_clusters()
     if show_map:
-        proc.draw_map(a=data.IndexPoint(data.IndexPoint.numbers.next(), 0.0, -90.0),
-                      b=data.IndexPoint(data.IndexPoint.numbers.next(), -60.0, -50.0))
+        proc.draw_map()
         proc.show()
     return proc
 
 
 if __name__ == "__main__":
-    processor = main()
+    processor = main(True)
