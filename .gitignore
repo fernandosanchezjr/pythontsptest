@@ -2,6 +2,7 @@
 data/world.tsp
 log.txt
 *.png
+!images/*.png
 venv/
 .ipynb_checkpoints
 *.ipynb
