@@ -112,20 +112,14 @@ class Processor(BaseProcessor):
     def subdivide(self):
         new_grids = self.process(_subdivide, self.data_set.grids)
         self.data_set.grids = new_grids
-        self.index = data.Index(self.data_set.grids)
-        self.index.build_index()
 
     @util.timeit
     def start_seeds(self):
         new_grids = self.process(_start_grid_seeds, self.data_set.grids)
-        self.data_set.grids = new_grids
-        self.index.set(self.data_set.grids)
 
     @util.timeit
     def find_clusters(self):
         new_grids = self.process(_find_clusters, self.data_set.grids)
-        self.data_set.grids = new_grids
-        self.index.set(new_grids)
 
     @util.timeit
     def draw_map(
