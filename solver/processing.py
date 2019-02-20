@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import sys
 import typing as t
 from concurrent import futures
 from operator import attrgetter
@@ -8,10 +7,9 @@ from operator import attrgetter
 import numpy as np
 import psutil
 
-from solver import constants, data, graph, util
+from solver import args, constants, data, graph, util
 
 logger = logging.getLogger(__name__)
-DEFAULT_DATA_FILE = util.get_relative_path(__file__, constants.DATA_FILE)
 
 
 async def _processor(executor, queue, func: (), args_list: t.List[t.Any]):
@@ -116,30 +114,22 @@ class Processor(BaseProcessor):
     @util.timeit
     def start_seeds(self):
         new_grids = self.process(_start_grid_seeds, self.data_set.grids)
+        self.data_set.grids = new_grids
 
     @util.timeit
     def find_clusters(self):
         new_grids = self.process(_find_clusters, self.data_set.grids)
+        self.data_set.grids = new_grids
 
     @util.timeit
     def draw_map(
             self,
-            a: t.Optional[data.IndexPoint] = None,
-            b: t.Optional[data.IndexPoint] = None
+            drawn_grids: t.Iterable[data.Grid] = None,
     ) -> graph.Map:
         m = graph.Map(f"{self.data_set.name} map")
-        all_grids = self.data_set.grids
-        if a or b:
-            def _grid_filter(fg: data.Grid) -> bool:
-                if a and a.quandrant_bearing(fg) != constants.Quadrant.Q_IV:
-                    return False
-                if b and b.quandrant_bearing(fg) != constants.Quadrant.Q_II:
-                    return False
-                return True
-
-            all_grids = filter(_grid_filter, self.data_set.grids)
+        drawn_grids = drawn_grids or self.data_set.grids
         grids, points, segments = [], ([], []), []
-        for grid in all_grids:
+        for grid in drawn_grids:
             g, new_points, s = m.generate_data(grid)
             grids.extend(g)
             if new_points:
@@ -158,9 +148,9 @@ class Processor(BaseProcessor):
 
 @util.timeit
 def main(show_map: bool = False):
-    target_path = sys.argv[1] if sys.argv[1:] else DEFAULT_DATA_FILE
-    logger.info("Loading %s", target_path)
-    proc = Processor.create(target_path)
+    startup_args = args.parse_args()
+    logger.info("Loading %s", startup_args.datafile)
+    proc = Processor.create(startup_args.datafile)
     proc.subdivide()
     proc.start_seeds()
     proc.find_clusters()
@@ -171,4 +161,4 @@ def main(show_map: bool = False):
 
 
 if __name__ == "__main__":
-    processor = main(True)
+    processor = main()
