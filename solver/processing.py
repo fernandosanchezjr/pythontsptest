@@ -72,7 +72,7 @@ def _start_grid_seeds(grid: data.Grid) -> data.Grid:
         for target, distance in nearest:
             nearest_segments.append(seed.segment_to(target, distance))
             if (not isinstance(target, data.Segment.Pointer) and
-                    len(nearest_segments) > constants.MIN_RESULT_COUNT):
+                len(nearest_segments) > constants.MIN_RESULT_COUNT):
                 break
         if not nearest_segments:
             continue
@@ -123,10 +123,13 @@ class Processor(BaseProcessor):
 
     @util.timeit
     def draw_map(
-            self,
-            drawn_grids: t.Iterable[data.Grid] = None,
+        self,
+        drawn_grids: t.Iterable[data.Grid] = None,
+        center: data.Coords = (0, 0),
+        bottom_left: data.Coords = (-180, -90),
+        top_right: data.Coords = (180, 90),
     ) -> graph.Map:
-        m = graph.Map(f"{self.data_set.name} map")
+        m = graph.Map(f"{self.data_set.name} map", center=center, bottom_left=bottom_left, top_right=top_right)
         drawn_grids = drawn_grids or self.data_set.grids
         grids, points, segments = [], ([], []), []
         for grid in drawn_grids:
@@ -161,4 +164,4 @@ def main(show_map: bool = False):
 
 
 if __name__ == "__main__":
-    processor = main()
+    processor = main(True)

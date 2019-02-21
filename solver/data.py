@@ -134,10 +134,10 @@ class Segment:
             return False
 
     def __init__(
-            self,
-            entry1: Point,
-            entry2: Point,
-            distance: float
+        self,
+        entry1: Point,
+        entry2: Point,
+        distance: float
     ):
         self.id_ = IndexPoint.numbers.next()
         self.raw_endpoints = frozenset((Segment.Pointer(self, entry1),
@@ -182,9 +182,9 @@ class Index:
     indexed: bool
 
     def __init__(
-            self,
-            contents: t.List[Indexable],
-            precision: int = constants.DEFAULT_PRECISION
+        self,
+        contents: t.List[Indexable],
+        precision: int = constants.DEFAULT_PRECISION
     ):
         self.set_precision(precision)
         self.set(contents)
@@ -205,12 +205,12 @@ class Index:
     def _search_radius(self) -> float:
         return GEO_HASH_GRID_SIZE[self.precision] / 2.0
 
-    def set(self, contents: t.List[Indexable]):
+    def set(self, contents: t.List[t.Any]):
         self.contents = contents
         self.index = None
         self.indexed = False
 
-    def remove(self, entry: Indexable):
+    def remove(self, entry: t.Any):
         self.set(list(filter(lambda c: c == entry, self.contents)))
 
     def build_index(self):
@@ -237,9 +237,9 @@ class Index:
         return results
 
     def get_nearest(
-            self, target: Point,
-            resize: bool = True,
-            min_count: int = constants.MIN_RESULT_COUNT,
+        self, target: Point,
+        resize: bool = True,
+        min_count: int = constants.MIN_RESULT_COUNT,
     ) -> t.List[Distance]:
         while True:
             self.build_index()
@@ -260,12 +260,11 @@ class Index:
                 self.set_precision(self.precision - 1)
 
 
-class Cluster(Indexable):
+class Cluster:
     segments: t.Set[Segment]
     points: t.Set[IndexPoint]
 
     def __init__(self):
-        self.id_ = self.numbers.next()
         self.segments = set()
         self.points = set()
 
@@ -294,9 +293,9 @@ class Cluster(Indexable):
             return item in self.points
         return False
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other):
         if isinstance(other, Cluster):
-            return self.id_ == other.id_
+            return self.points == other.points
         return False
 
     def __gt__(self, other):
@@ -309,11 +308,8 @@ class Cluster(Indexable):
             return len(self.points) < len(other.points)
         return False
 
-    def __hash__(self) -> int:
-        return self.id_
-
     def __repr__(self):
-        return f'{self.__class__.__name__} #{self.id_}({len(self.points)})'
+        return f'{self.__class__.__name__} ({len(self.points)})'
 
     __str__ = __repr__
 
@@ -333,12 +329,12 @@ class Grid(IndexPoint, Index):
     seed: t.Optional[Point]
 
     def __init__(
-            self,
-            latitude: float,
-            longitude: float,
-            contents: t.List[Indexable],
-            radius: float = constants.INITIAL_RADIUS,
-            depth: int = 0
+        self,
+        latitude: float,
+        longitude: float,
+        contents: t.List[Indexable],
+        radius: float = constants.INITIAL_RADIUS,
+        depth: int = 0
     ):
         self.seed = None
         self.radius = radius
@@ -380,7 +376,7 @@ class Grid(IndexPoint, Index):
                  (self.latitude - new_radius, self.longitude + new_radius)))
 
     def bounds(
-            self,
+        self,
     ) -> t.List[Coords]:
         lon, lat = self.map_coords
         lon1, lat1 = lon - self.radius, lat + self.radius
@@ -429,27 +425,27 @@ class Grid(IndexPoint, Index):
         return itertools.chain(local, terminal_grids, itertools.chain.from_iterable((c.terminals(child=True)
                                                                                      for c in grids)))
 
-    def endpoints(self, child: bool = False) -> t.Iterable[Indexable]:
+    def endpoints(self, child: bool = False) -> t.Iterable[t.Any]:
         grids = list(self.terminals(child=child))
         return itertools.chain(
-            filter(lambda c: not isinstance(c, Grid), self.contents),
+            filter(lambda c: isinstance(c, (Point, Segment)), self.contents),
             itertools.chain.from_iterable((c.endpoints(child=True) for c in grids)))
 
-    def find(self, func: t.Callable[[Indexable], bool]) -> Indexable:
+    def find(self, func: t.Callable[[t.Any], bool]) -> t.Any:
         return next(filter(func, self.contents), None)
 
     def filter(
-            self,
-            func: t.Callable[[Indexable], bool]
-    ) -> t.Iterator[Indexable]:
+        self,
+        func: t.Callable[[t.Any], bool]
+    ) -> t.Iterator[t.Any]:
         return filter(func, self.contents)
 
     def __contains__(self, item):
         return self.find(lambda c: c == item) is not None
 
     def sieve(
-            self,
-            entry: IndexPoint
+        self,
+        entry: IndexPoint
     ) -> t.Tuple[t.Optional[IndexPoint], t.List['Grid']]:
         if entry in self:
             return entry, [self]
@@ -465,6 +461,12 @@ class Grid(IndexPoint, Index):
     @property
     def empty(self):
         return len(self.contents) == 0
+
+    def zoom(self):
+        lon, lat = self.map_coords
+        lon1, lat1 = lon - self.radius, lat - self.radius
+        lon2, lat2 = lon + self.radius, lat + self.radius
+        return (lon, lat), (lon1, lat1), (lon2, lat2)
 
 
 class DataSet:
@@ -497,8 +499,8 @@ class DataSet:
 
     @staticmethod
     def _read_points(
-            fh: t.TextIO,
-            edge_weight_type: EdgeWeightType
+        fh: t.TextIO,
+        edge_weight_type: EdgeWeightType
     ) -> t.List[IndexPoint]:
         coord_parser = float
         if edge_weight_type == EdgeWeightType.EUC_2D:
@@ -535,8 +537,8 @@ def common_path(*paths: t.List[Grid]) -> t.Tuple[t.List[Grid],
 
 
 def remove_nested_entry(
-        route: t.List[Grid],
-        entry: IndexPoint
+    route: t.List[Grid],
+    entry: IndexPoint
 ) -> t.List[Grid]:
     reversed_path = reversed(route)
     new_route = []

@@ -19,19 +19,30 @@ MapData = t.Tuple[GridCoords, PointCoords, SegmentCoords]
 class Map:
     numbers = util.Numbers()
     title: t.Any
+    center: data.Coords
 
-    def __init__(self, title=""):
+    def __init__(
+        self,
+        title="",
+        center: data.Coords = (0, 0),
+        bottom_left: data.Coords = (-180, -90),
+        top_right: data.Coords = (180, 90),
+    ):
         self.title = title
         self.fig = plt.figure(self.title or self.numbers.next())
+        self.center = center
         # miller projection
-        self.world_map = Basemap(projection='mill', lon_0=180)
+        lon_0, lat_0 = center
+        llcrnrlon, llcrnrlat = bottom_left
+        urcrnrlon, urcrnrlat = top_right
+        self.world_map = Basemap(projection='mill', lon_0=lon_0, lat_0=lat_0,
+                                 llcrnrlon=llcrnrlon, llcrnrlat=llcrnrlat,
+                                 urcrnrlon=urcrnrlon, urcrnrlat=urcrnrlat)
         # plot coastlines, draw label meridians and parallels.
         self.world_map.drawcoastlines()
-        self.world_map.drawparallels(
-            np.arange(-90, 90, 30), labels=[1, 0, 0, 0])
-        self.world_map.drawmeridians(
-            np.arange(self.world_map.lonmin, self.world_map.lonmax + 30, 60),
-            labels=[0, 0, 0, 1])
+        self.world_map.drawparallels(np.arange(-90, 90, 30), labels=[1, 0, 0, 0])
+        self.world_map.drawmeridians(np.arange(self.world_map.lonmin, self.world_map.lonmax + 30, 60),
+                                     labels=[0, 0, 0, 1])
         # fill continents 'coral' (with zorder=0), color wet areas 'aqua'
         self.world_map.drawmapboundary(fill_color='aqua')
         self.world_map.fillcontinents(color='coral', lake_color='aqua')
@@ -41,6 +52,7 @@ class Map:
     def to_map_xy(self, entries: t.List[data.Coords]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
         x, y = bounds.T
+        x = self.world_map.shiftdata(x, lon_0=self.center[0], fix_wrap_around=True)
         return self.world_map(x, y)
 
     @staticmethod
