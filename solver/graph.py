@@ -52,7 +52,7 @@ class Map:
     def to_map_xy(self, entries: t.List[data.Coords]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
         x, y = bounds.T
-        x = self.world_map.shiftdata(x, lon_0=self.center[0], fix_wrap_around=True)
+        x, y = self.world_map.shiftdata(x, datain=y, lon_0=self.center[0], fix_wrap_around=True)
         return self.world_map(x, y)
 
     @staticmethod
