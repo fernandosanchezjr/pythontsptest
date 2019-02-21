@@ -99,10 +99,18 @@ class Point(IndexPoint):
     def segment_to(self, to: 'Point', distance: float) -> 'Segment':
         return Segment(self, to, distance)
 
+    def clone(self) -> 'Point':
+        result = Point(self.id_, self.latitude, self.longitude)
+        result.duplicates = self.duplicates
+        result.depth = self.depth
+        result._rad_latitude = self._rad_latitude
+        result._rad_longitude = self._rad_longitude
+        return result
+
 
 class Segment:
     id_: int
-    raw_endpoints: t.Set[IndexPoint]
+    raw_endpoints: t.Set[Point]
     distance: float
     depth: int
 
@@ -155,7 +163,7 @@ class Segment:
         return False
 
     @property
-    def endpoints(self) -> t.Tuple[IndexPoint, IndexPoint]:
+    def endpoints(self) -> t.Tuple[Point, Point]:
         a, b = self.raw_endpoints
         return a, b
 
@@ -262,7 +270,7 @@ class Index:
 
 class Cluster:
     segments: t.Set[Segment]
-    points: t.Set[IndexPoint]
+    points: t.Set[Point]
 
     def __init__(self):
         self.segments = set()
@@ -281,7 +289,7 @@ class Cluster:
                 self.segments.add(s)
             for p in item.points:
                 self.points.add(p)
-        elif isinstance(item, IndexPoint):
+        elif isinstance(item, Point):
             self.points.add(item)
 
     def __contains__(self, item) -> bool:
@@ -289,7 +297,7 @@ class Cluster:
             return item in self.segments
         elif isinstance(item, Cluster):
             return not bool(item.points - self.points)
-        elif isinstance(item, IndexPoint):
+        elif isinstance(item, Point):
             return item in self.points
         return False
 
@@ -321,6 +329,14 @@ class Cluster:
         elif isinstance(item, IndexPoint):
             return item in self.points
         return False
+
+
+class Route(Indexable):
+    points: t.Set[Point]
+
+    def __init__(self, cluster: Cluster):
+        self.id_ = self.numbers.next()
+        self.points = set([p.clone() for p in cluster.points])
 
 
 class Grid(IndexPoint, Index):
@@ -428,8 +444,9 @@ class Grid(IndexPoint, Index):
     def endpoints(self, child: bool = False) -> t.Iterable[t.Any]:
         grids = list(self.terminals(child=child))
         return itertools.chain(
-            filter(lambda c: isinstance(c, (Point, Segment)), self.contents),
-            itertools.chain.from_iterable((c.endpoints(child=True) for c in grids)))
+            filter(lambda c: not isinstance(c, Grid), self.contents),
+            itertools.chain.from_iterable((c.endpoints(child=True) for c in grids))
+        )
 
     def find(self, func: t.Callable[[t.Any], bool]) -> t.Any:
         return next(filter(func, self.contents), None)

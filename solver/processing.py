@@ -71,8 +71,7 @@ def _start_grid_seeds(grid: data.Grid) -> data.Grid:
         nearest_segments = []
         for target, distance in nearest:
             nearest_segments.append(seed.segment_to(target, distance))
-            if (not isinstance(target, data.Segment.Pointer) and
-                len(nearest_segments) > constants.MIN_RESULT_COUNT):
+            if not isinstance(target, data.Segment.Pointer) and len(nearest_segments) > constants.MIN_RESULT_COUNT:
                 break
         if not nearest_segments:
             continue
