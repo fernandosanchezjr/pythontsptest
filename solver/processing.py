@@ -59,7 +59,6 @@ def _subdivide_and_join(grid: data.Grid) -> data.Grid:
     grid.subdivide()
     main_graph = grid.join_graphs()
     grid.graph = main_graph
-    grid.set([])
 
     nodes = set(main_graph.nodes())
     edges = set(main_graph.edges())
@@ -79,6 +78,8 @@ def _subdivide_and_join(grid: data.Grid) -> data.Grid:
                          key=itemgetter(1))
         for other, distance, node in nearest[:10]:
             main_graph.add_edge(node, other, weight=distance)
+
+    grid.set([])
 
     return grid
 
