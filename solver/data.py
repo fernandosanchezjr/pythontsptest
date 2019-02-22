@@ -6,6 +6,7 @@ import typing as t
 from operator import itemgetter
 from os import path
 
+import networkx as nx
 from geoindex import GeoGridIndex, GeoPoint
 from geoindex.geo_grid_index import GEO_HASH_GRID_SIZE
 
@@ -96,89 +97,6 @@ class Point(IndexPoint):
             self.duplicates.extend(duplicates)
         return self
 
-    def segment_to(self, to: 'Point', distance: float) -> 'Segment':
-        return Segment(self, to, distance)
-
-    def clone(self) -> 'Point':
-        result = Point(self.id_, self.latitude, self.longitude)
-        result.duplicates = self.duplicates
-        result.depth = self.depth
-        result._rad_latitude = self._rad_latitude
-        result._rad_longitude = self._rad_longitude
-        return result
-
-
-class Segment:
-    id_: int
-    raw_endpoints: t.Set[Point]
-    distance: float
-    depth: int
-
-    class Pointer(Point):
-        segment: 'Segment'
-
-        # noinspection PyMissingConstructor
-        def __init__(self, segment: 'Segment', point: Point):
-            self.id_ = point.id_
-            self.duplicates = point.duplicates
-            self.latitude = point.latitude
-            self.longitude = point.longitude
-            self._rad_latitude = point._rad_latitude
-            self._rad_longitude = point._rad_longitude
-            self.depth = point.depth
-            self.segment = segment
-
-        def segment_to(self, to: Point, distance: float) -> 'Segment':
-            return Segment(self, to, distance)
-
-        def __hash__(self) -> int:
-            return self.id_
-
-        def __eq__(self, other):
-            if isinstance(other, Segment):
-                return self in other.raw_endpoints
-            if isinstance(other, IndexPoint):
-                return self.id_ == other.id_
-            return False
-
-    def __init__(
-        self,
-        entry1: Point,
-        entry2: Point,
-        distance: float
-    ):
-        self.id_ = IndexPoint.numbers.next()
-        self.raw_endpoints = frozenset((Segment.Pointer(self, entry1),
-                                        Segment.Pointer(self, entry2)))
-        self.distance = distance
-
-    def __hash__(self) -> int:
-        return self.id_
-
-    def __eq__(self, other) -> bool:
-        if isinstance(other, Segment):
-            return self.raw_endpoints == other.raw_endpoints
-        elif isinstance(other, IndexPoint):
-            return other in self.raw_endpoints
-        return False
-
-    @property
-    def endpoints(self) -> t.Tuple[Point, Point]:
-        a, b = self.raw_endpoints
-        return a, b
-
-    def __repr__(self):
-        return f'{self.__class__.__name__} #{self.id_}(' \
-            f'{self.endpoints[0]} -> {self.endpoints[1]} ' \
-            f'distance={self.distance})'
-
-    __str__ = __repr__
-
-    @property
-    def map_endpoints(self) -> t.List[Coords]:
-        a, b = self.endpoints
-        return [a.map_coords, b.map_coords]
-
 
 Distance = t.Tuple[Point, float]
 
@@ -225,24 +143,9 @@ class Index:
         if not self.indexed:
             self.index = GeoGridIndex(precision=self.precision)
             for c in self.contents:
-                if isinstance(c, Segment):
-                    for e in c.endpoints:
-                        self.index.add_point(e)
                 if isinstance(c, IndexPoint):
                     self.index.add_point(c)
             self.indexed = True
-
-    @staticmethod
-    def _deduplicate_segments(nearest: t.List[Distance]) -> t.List[Distance]:
-        dupes = set()
-        results = []
-        for entry, distance in nearest:
-            if isinstance(entry, Segment.Pointer):
-                if entry.segment.id_ in dupes:
-                    continue
-                dupes.add(entry.segment.id_)
-            results.append((entry, distance))
-        return results
 
     def get_nearest(
         self, target: Point,
@@ -260,89 +163,23 @@ class Index:
             except ValueError:
                 points = []
             if not resize:
-                return self._deduplicate_segments(points)
+                return points
             elif (len(points) >= min_count or
                   self.precision == constants.MIN_PRECISION):
-                return self._deduplicate_segments(points)
+                return points
             else:
                 self.set_precision(self.precision - 1)
 
 
-class Cluster:
-    segments: t.Set[Segment]
-    points: t.Set[Point]
-
-    def __init__(self):
-        self.segments = set()
-        self.points = set()
-
-    def empty(self):
-        return len(self.points) == 0
-
-    def append(self, item):
-        if isinstance(item, Segment):
-            self.segments.add(item)
-            for p in item.endpoints:
-                self.points.add(p)
-        elif isinstance(item, Cluster):
-            for s in item.segments:
-                self.segments.add(s)
-            for p in item.points:
-                self.points.add(p)
-        elif isinstance(item, Point):
-            self.points.add(item)
-
-    def __contains__(self, item) -> bool:
-        if isinstance(item, Segment):
-            return item in self.segments
-        elif isinstance(item, Cluster):
-            return not bool(item.points - self.points)
-        elif isinstance(item, Point):
-            return item in self.points
-        return False
-
-    def __eq__(self, other):
-        if isinstance(other, Cluster):
-            return self.points == other.points
-        return False
-
-    def __gt__(self, other):
-        if isinstance(other, Cluster):
-            return len(self.points) > len(other.points)
-        return False
-
-    def __lt__(self, other):
-        if isinstance(other, Cluster):
-            return len(self.points) < len(other.points)
-        return False
-
-    def __repr__(self):
-        return f'{self.__class__.__name__} ({len(self.points)})'
-
-    __str__ = __repr__
-
-    def intersects(self, item) -> bool:
-        if isinstance(item, Segment):
-            return bool(self.points & set(item.endpoints))
-        elif isinstance(item, Cluster):
-            return bool(self.points & item.points)
-        elif isinstance(item, IndexPoint):
-            return item in self.points
-        return False
-
-
-class Route(Indexable):
-    points: t.Set[Point]
-
-    def __init__(self, cluster: Cluster):
-        self.id_ = self.numbers.next()
-        self.points = set([p.clone() for p in cluster.points])
+Segment = t.List[Coords]
 
 
 class Grid(IndexPoint, Index):
     radius: float
     depth: int
-    seed: t.Optional[Point]
+    graph: nx.Graph
+
+    # seed: t.Optional[Point]
 
     def __init__(
         self,
@@ -350,14 +187,16 @@ class Grid(IndexPoint, Index):
         longitude: float,
         contents: t.List[Indexable],
         radius: float = constants.INITIAL_RADIUS,
-        depth: int = 0
+        depth: int = 0,
+        id_: t.Optional[int] = None
     ):
         self.seed = None
         self.radius = radius
         self.depth = depth
-        super().__init__(self.numbers.next(), latitude, longitude)
+        super().__init__(id_ or self.numbers.next(), latitude, longitude)
         self.set(contents)
         self.set_precision(constants.DEFAULT_PRECISION)
+        self.graph = nx.Graph(depth=self.depth)
 
     def __repr__(self):
         return (f'{self.__class__.__name__} #{self.id_}[{self.depth}]'
@@ -404,28 +243,35 @@ class Grid(IndexPoint, Index):
                 (lon2, lat2),
                 (lon1, lat2)]
 
+    def redistribute(
+        self,
+        point: IndexPoint,
+        quadrants: t.Tuple[Coords, Coords, Coords, Coords],
+    ):
+        bearing = self.quandrant_bearing(point)
+        return (quadrants[bearing], bearing), point
+
     def subdivide(self):
         point_count = len(self.contents)
         if point_count <= constants.MAX_GRID_DENSITY:
             for entry in self.contents:
                 entry.depth = self.depth
             if point_count == 1:
-                self.seed = self.contents[0]
+                self.graph.add_node(self.contents[0])
             elif point_count == 2:
                 p1, p2 = self.contents
-                segment = p1.segment_to(p2, p1.distance_to(p2))
-                self.set([segment])
+                self.graph.add_edge(p1, p2, weight=p1.distance_to(p2))
             return
         new_radius, quadrant_coords = self.sub_quadrants()
         new_depth = self.depth + 1
-        redistributed_points = ((c, quadrant_coords[self.quandrant_bearing(c)])
-                                for c in self.contents if isinstance(c, IndexPoint))
+        redistributed_points = (self.redistribute(p, quadrant_coords)
+                                for p in self.contents if isinstance(p, IndexPoint))
         grouped_points = itertools.groupby(sorted(redistributed_points,
-                                                  key=itemgetter(1)),
-                                           key=itemgetter(1))
-        new_contents = [Grid(lat, lon, list(map(itemgetter(0), points)),
-                             radius=new_radius, depth=new_depth)
-                        for (lat, lon), points in grouped_points]
+                                                  key=itemgetter(0)),
+                                           key=itemgetter(0))
+        new_contents = [Grid(lat, lon, list(map(itemgetter(1), points)), radius=new_radius, depth=new_depth,
+                             id_=(self.id_ * 10) + bearing)
+                        for ((lat, lon), bearing), points in grouped_points]
         for c in new_contents:
             if isinstance(c, Grid):
                 c.subdivide()
@@ -441,15 +287,23 @@ class Grid(IndexPoint, Index):
         return itertools.chain(local, terminal_grids, itertools.chain.from_iterable((c.terminals(child=True)
                                                                                      for c in grids)))
 
-    def endpoints(self, child: bool = False) -> t.Iterable[t.Any]:
+    def _get_graphs(self, child: bool = False) -> t.Iterable[nx.Graph]:
         grids = list(self.terminals(child=child))
         return itertools.chain(
-            filter(lambda c: not isinstance(c, Grid), self.contents),
-            itertools.chain.from_iterable((c.endpoints(child=True) for c in grids))
+            (self.graph,),
+            itertools.chain.from_iterable((c._get_graphs(child=True) for c in grids))
         )
 
+    def join_graphs(self) -> nx.Graph:
+        new_graph = nx.Graph()
+        all_graphs = self._get_graphs()
+        for g in all_graphs:
+            new_graph.add_edges_from(g.edges(data=True), depth=g.graph.get('depth'))
+            new_graph.add_nodes_from(g.nodes(data=True), depth=g.graph.get('depth'))
+        return new_graph
+
     def find(self, func: t.Callable[[t.Any], bool]) -> t.Any:
-        return next(filter(func, self.contents), None)
+        return next(self.filter(func), None)
 
     def filter(
         self,
@@ -460,21 +314,6 @@ class Grid(IndexPoint, Index):
     def __contains__(self, item):
         return self.find(lambda c: c == item) is not None
 
-    def sieve(
-        self,
-        entry: IndexPoint
-    ) -> t.Tuple[t.Optional[IndexPoint], t.List['Grid']]:
-        if entry in self:
-            return entry, [self]
-        _, quadrant_coords = self.sub_quadrants()
-        coords = quadrant_coords[self.quandrant_bearing(entry)]
-        next_grid: t.Optional[Grid] = next(self.filter(
-            lambda ng: isinstance(ng, Grid) and ng.coords == coords), None)
-        if not next_grid:
-            return None, [self]
-        target, route = next_grid.sieve(entry)
-        return target, [self] + route
-
     @property
     def empty(self):
         return len(self.contents) == 0
@@ -484,6 +323,13 @@ class Grid(IndexPoint, Index):
         lon1, lat1 = lon - self.radius, lat - self.radius
         lon2, lat2 = lon + self.radius, lat + self.radius
         return (lon, lat), (lon1, lat1), (lon2, lat2)
+
+    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords], t.List[Segment]]:
+        return (
+            (self.bounds(), self.radius),
+            [n.map_coords for n in self.graph.nodes()],
+            [[a.map_coords, b.map_coords] for a, b in list(self.graph.edges())],
+        )
 
 
 class DataSet:
@@ -542,31 +388,6 @@ class DataSet:
                                            key=itemgetter(1))
         return [Grid(lat, lon, list(map(itemgetter(0), points)))
                 for (lat, lon), points in grouped_points]
-
-
-def common_path(*paths: t.List[Grid]) -> t.Tuple[t.List[Grid],
-                                                 t.List[t.List[Grid]]]:
-    prefix = list(map(itemgetter(0),
-                      itertools.takewhile(lambda x: all(x[0] == y for y in x),
-                                          zip(*paths))))
-    remainders = [p[len(prefix):] for p in paths]
-    return prefix, remainders
-
-
-def remove_nested_entry(
-    route: t.List[Grid],
-    entry: IndexPoint
-) -> t.List[Grid]:
-    reversed_path = reversed(route)
-    new_route = []
-    for grid in reversed_path:
-        if entry in grid:
-            grid.remove(entry)
-        if grid.empty:
-            entry = grid
-        else:
-            new_route.append(grid)
-    return list(reversed(new_route))
 
 
 if __name__ == "__main__":

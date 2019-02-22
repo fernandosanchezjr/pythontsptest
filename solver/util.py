@@ -22,8 +22,7 @@ def timeit(method):
         ts = time.time()
         result = method(*args, **kw)
         te = time.time()
-        logging.debug("%s elapsed time: %f sec",
-                      method.__qualname__, (te - ts))
+        logging.debug("%s elapsed time: %f sec", method.__qualname__, (te - ts))
         return result
     return timed
 

@@ -1,13 +1,13 @@
 import asyncio
+import itertools
 import logging
 import typing as t
 from concurrent import futures
-from operator import attrgetter
+from operator import itemgetter
 
-import numpy as np
 import psutil
 
-from solver import args, constants, data, graph, util
+from solver import args, data, graph, util
 
 logger = logging.getLogger(__name__)
 
@@ -55,47 +55,31 @@ class BaseProcessor:
         return results
 
 
-def _subdivide(grid: data.Grid) -> data.Grid:
+def _subdivide_and_join(grid: data.Grid) -> data.Grid:
     grid.subdivide()
-    return grid
+    main_graph = grid.join_graphs()
+    grid.graph = main_graph
+    grid.set([])
 
+    nodes = set(main_graph.nodes())
+    edges = set(main_graph.edges())
+    edge_nodes = set(itertools.chain.from_iterable(edges))
+    non_edge_nodes = nodes - edge_nodes
 
-def _start_grid_seeds(grid: data.Grid) -> data.Grid:
-    terminals = list(filter(attrgetter('seed'), grid.terminals()))
-    seeds: t.List[data.Point] = list(map(attrgetter('seed'),
-                                         terminals))
-    index = data.Index(list(grid.endpoints()))
-    for seed in seeds:
-        nearest = index.get_nearest(seed,
-                                    min_count=constants.SEED_DISTANCES)
-        nearest_segments = []
-        for target, distance in nearest:
-            nearest_segments.append(seed.segment_to(target, distance))
-            if not isinstance(target, data.Segment.Pointer) and len(nearest_segments) > constants.MIN_RESULT_COUNT:
-                break
-        if not nearest_segments:
-            continue
-        _, route = grid.sieve(seed)
-        new_route = data.remove_nested_entry(route, seed)
-        new_route[-1].append(*nearest_segments)
-    return grid
+    grid.set(list(nodes))
+    for node in non_edge_nodes:
+        nearest = grid.get_nearest(node)
+        for other, distance in nearest[:10]:
+            main_graph.add_edge(node, other, weight=distance)
 
+    for a, b in edges:
+        nearest_a = [(p, d, a) for p, d in grid.get_nearest(a)]
+        nearest_b = [(p, d, b) for p, d in grid.get_nearest(b)]
+        nearest = sorted(nearest_a + nearest_b,
+                         key=itemgetter(1))
+        for other, distance, node in nearest[:10]:
+            main_graph.add_edge(node, other, weight=distance)
 
-def _find_clusters(grid: data.Grid):
-    endpoints = {g.id_: g
-                 for g in grid.endpoints()}
-    clusters = []
-    while len(endpoints):
-        c = data.Cluster()
-        for e in list(endpoints.values()):
-            if c.empty():
-                c.append(e)
-                del endpoints[e.id_]
-            elif c.intersects(e):
-                c.append(e)
-                del endpoints[e.id_]
-        clusters.append(c)
-    grid.set(clusters)
     return grid
 
 
@@ -106,18 +90,8 @@ class Processor(BaseProcessor):
         return cls(data.DataSet(file_path))
 
     @util.timeit
-    def subdivide(self):
-        new_grids = self.process(_subdivide, self.data_set.grids)
-        self.data_set.grids = new_grids
-
-    @util.timeit
-    def start_seeds(self):
-        new_grids = self.process(_start_grid_seeds, self.data_set.grids)
-        self.data_set.grids = new_grids
-
-    @util.timeit
-    def find_clusters(self):
-        new_grids = self.process(_find_clusters, self.data_set.grids)
+    def subdivide_and_join(self):
+        new_grids = self.process(_subdivide_and_join, self.data_set.grids)
         self.data_set.grids = new_grids
 
     @util.timeit
@@ -130,16 +104,12 @@ class Processor(BaseProcessor):
     ) -> graph.Map:
         m = graph.Map(f"{self.data_set.name} map", center=center, bottom_left=bottom_left, top_right=top_right)
         drawn_grids = drawn_grids or self.data_set.grids
-        grids, points, segments = [], ([], []), []
+        grids, points, segments = [], [], []
         for grid in drawn_grids:
-            g, new_points, s = m.generate_data(grid)
-            grids.extend(g)
-            if new_points:
-                x, y = new_points
-                old_x, old_y = points
-                points = (np.concatenate((old_x, x)),
-                          np.concatenate((old_y, y)))
-            segments.extend(s)
+            bounds, new_points, new_segments = grid.map()
+            grids.append(bounds)
+            points.extend(new_points)
+            segments.extend(new_segments)
         m.draw_data(grids, points, segments)
         return m
 
@@ -153,9 +123,7 @@ def main(show_map: bool = False):
     startup_args = args.parse_args()
     logger.info("Loading %s", startup_args.datafile)
     proc = Processor.create(startup_args.datafile)
-    proc.subdivide()
-    proc.start_seeds()
-    proc.find_clusters()
+    proc.subdivide_and_join()
     if show_map:
         proc.draw_map()
         proc.show()
