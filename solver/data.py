@@ -15,6 +15,8 @@ from solver import constants, util
 logger = logging.getLogger(__name__)
 COORD_DELIMITER = "NODE_COORD_SECTION"
 
+NUMBERS: t.ClassVar[util.Numbers] = util.Numbers()
+
 
 class EdgeWeightType(str, enum.Enum):
     EUC_2D = "EUC_2D"
@@ -38,7 +40,6 @@ def xy(latitude: float, longitude: float) -> Coords:
 
 
 class Indexable:
-    numbers: t.ClassVar[util.Numbers] = util.Numbers()
     id_: int
 
 
@@ -179,8 +180,6 @@ class Grid(IndexPoint, Index):
     depth: int
     graph: nx.Graph
 
-    # seed: t.Optional[Point]
-
     def __init__(
         self,
         latitude: float,
@@ -193,7 +192,7 @@ class Grid(IndexPoint, Index):
         self.seed = None
         self.radius = radius
         self.depth = depth
-        super().__init__(id_ or self.numbers.next(), latitude, longitude)
+        super().__init__(id_ or NUMBERS.next(), latitude, longitude)
         self.set(contents)
         self.set_precision(constants.DEFAULT_PRECISION)
         self.graph = nx.Graph(depth=self.depth)

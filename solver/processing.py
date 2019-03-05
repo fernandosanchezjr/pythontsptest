@@ -132,4 +132,4 @@ def main(show_map: bool = False):
 
 
 if __name__ == "__main__":
-    processor = main(True)
+    main(True)
