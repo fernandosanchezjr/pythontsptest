@@ -1,15 +1,8 @@
+import itertools
 import logging
 import time
 from os import path
 
-
-def setup_logging():
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    root.addHandler(logging.StreamHandler())
-
-
-setup_logging()
 logger = logging.getLogger(__name__)
 
 
@@ -43,3 +36,10 @@ class Numbers:
 
     def next(self) -> int:
         return next(self)
+
+
+def partition(pred, iterable):
+    """Use a predicate to partition entries into false entries and true entries"""
+    # partition(is_odd, range(10)) --> 0 2 4 6 8   and  1 3 5 7 9
+    t1, t2 = itertools.tee(iterable)
+    return itertools.filterfalse(pred, t1), filter(pred, t2)

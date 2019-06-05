@@ -1,15 +1,15 @@
 import asyncio
+import itertools
 import logging
 import typing as t
 from concurrent import futures
+from operator import itemgetter
 
-import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import psutil
-from matplotlib.collections import PatchCollection
-from matplotlib.patches import Polygon
 
-from new_solver import args, data, util
+from new_solver import args, convex_hull, graph, data, util
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class Processor:
         self._queue = asyncio.Queue()
         self.index = None
 
-    def process(self, func: (), args_list: t.List[t.Any]):
+    def process(self, func: (), args_list: t.List[t.Any]) -> t.List[t.Any]:
         _, results = self._loop.run_until_complete(asyncio.gather(
             _processor(self._executor, self._queue, func, args_list),
             _consumer(self._queue, len(args_list))
@@ -54,17 +54,44 @@ class Processor:
         return results
 
 
-def _do_test(grid: data.Grid):
-    return grid
+def extract_hull(points: t.List[data.Point]) -> t.Tuple[t.List[data.Point], t.List[data.Point]]:
+    all_points = [(p.array(), p) for p in points]
+    hull_coords = list(np.array(convex_hull.convex_hull(np.array(list(map(itemgetter(0), all_points))))).tolist())
+
+    hull_matches = sorted(((coords in hull_coords, coords, p) for coords, p in all_points), key=itemgetter(0))
+    grouped_points = {present: list(matches) for present, matches in itertools.groupby(hull_matches, key=itemgetter(0))}
+
+    hull_points = sorted(grouped_points.get(True, []), key=lambda p: hull_coords.index(p[1]))
+
+    if len(hull_points) > 2:
+        hull_points.append(hull_points[0])
+
+    non_hull_points = grouped_points.get(False, [])
+
+    return list(map(itemgetter(2), hull_points)), list(map(itemgetter(2), non_hull_points))
 
 
-def test(processor: Processor, grids: t.List[data.Grid]) -> t.List[data.Grid]:
-    new_grids = processor.process(_do_test, grids)
-    return new_grids
+def _do_convex_hull(grid: data.Grid) -> data.Grid:
+    g = nx.Graph()
+    all_points = grid.points
+    depth = 0
+    while len(all_points) > 2:
+        hull, all_points = extract_hull(all_points)
+        if not hull:
+            break
+        for a, b in zip(hull, hull[1:]):
+            g.add_edge(a, b, weight=a.distance_to(b), depth=depth, single=False)
+        depth += 1
 
+    if len(all_points) == 2:
+        a, b = all_points
+        g.add_edge(a, b, weight=a.distance_to(b), depth=depth, single=False)
+        depth += 1
 
-def _do_convex_hull(grid: data.Grid):
-    return grid.calculate_hull()
+    elif len(all_points) == 1:
+        g.add_node(all_points[0], depth=depth, single=True)
+
+    return grid.set_graph(g)
 
 
 def convex_hulls(processor: Processor, grids: t.List[data.Grid]) -> t.List[data.Grid]:
@@ -78,26 +105,35 @@ def process_grids(grids: t.List[data.Grid]) -> t.List[data.Grid]:
 
 
 @util.timeit
-def draw_graph(name: str, grids: t.List[data.Grid]):
-    all_points = np.concatenate([g.array() for g in grids])
-    plt.figure(name)
-    plt.scatter(x=all_points[:, 0], y=all_points[:, 1])
-    patches = PatchCollection([Polygon(g.hull) for g in grids], edgecolors='red', facecolors='none')
-    ax = plt.gca()
-    ax.add_collection(patches)
-    plt.draw()
+def draw_map(
+    name: str,
+    grids: t.Iterable[data.Grid],
+    center: data.Coords = (0, 0),
+    bottom_left: data.Coords = (-180, -90),
+    top_right: data.Coords = (180, 90),
+) -> graph.Map:
+    m = graph.Map(f"{name} map", center=center, bottom_left=bottom_left, top_right=top_right)
+    drawn_grids, points, segments = [], [], []
+    for grid in grids:
+        bounds, new_points, new_segments = grid.map()
+        drawn_grids.append(bounds)
+        points.extend(new_points)
+        segments.extend(new_segments)
+    m.draw_data(drawn_grids, points, segments)
+    return m
 
 
 @util.timeit
-def main(show_map: bool = False):
+def load(show_map: bool = False):
     startup_args = args.parse_args()
     logger.info("Loading %s", startup_args.datafile)
     name, grids = data.load_datafile(startup_args.datafile)
     grids = process_grids(grids)
     if show_map:
-        draw_graph(name, grids)
-        plt.show()
+        m = draw_map(name, grids)
+        m.show()
+    return grids
 
 
 if __name__ == "__main__":
-    main(True)
+    load(True)

@@ -1,17 +1,19 @@
 import itertools
 import logging
-import math
 import typing as t
 from operator import itemgetter
 
+import math
+import networkx as nx
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from geoindex import utils as geo_utils
 
 from new_solver import constants, util
-from new_solver.convex_hull import convex_hull
 
 logger = logging.getLogger(__name__)
 COORD_DELIMITER = "NODE_COORD_SECTION"
+RADIUS = 0.5
 
 Coords = t.Tuple[float, float]
 NPCoords = t.List[float]
@@ -19,10 +21,12 @@ NPCoords = t.List[float]
 
 @dataclass(frozen=True)
 class Point:
-    id: int
+    id_: int
     lon: float
     lat: float
-    duplicates: t.List['Point']
+    rad_lon: float
+    rad_lat: float
+    duplicates: t.Optional[t.Tuple['Point']] = None
 
     @property
     def coords(self) -> Coords:
@@ -32,11 +36,44 @@ class Point:
     def map_coords(self) -> Coords:
         return self.lon % 360.0, self.lat
 
-    def merge_duplicates(self, duplicates: t.List['Point']) -> 'Point':
-        return Point(self.id, self.lon, self.lat, duplicates)
+    def merge_duplicates(self, duplicates: t.Tuple['Point']) -> 'Point':
+        return create_point(self.id_, self.lon, self.lat, duplicates)
 
     def array(self) -> NPCoords:
         return [self.lon, self.lat]
+
+    def __eq__(self, other):
+        if isinstance(other, Point):
+            return self.id_ == other.id_
+        return self == other
+
+    def distance_to(self, point):
+        """
+        Calculate distance in miles or kilometers between current and other
+        passed point.
+        """
+        assert isinstance(point, Point), (
+            'Other point should also be a Point instance.'
+        )
+        if self.coords == point.coords:
+            return 0.0
+        coefficient = 69.09
+        theta = self.lon - point.lon
+
+        distance = math.degrees(math.acos(
+            math.sin(self.rad_lat) * math.sin(point.rad_lat) +
+            math.cos(self.rad_lat) * math.cos(point.rad_lat) *
+            math.cos(math.radians(theta))
+        )) * coefficient
+
+        return geo_utils.mi_to_km(distance)
+
+
+def create_point(_id: int, lon: float, lat: float, duplicates: t.Optional[t.Tuple['Point']] = None) -> Point:
+    return Point(_id, lon, lat, math.radians(lon), math.radians(lat), duplicates)
+
+
+Segment = t.List[Coords]
 
 
 @dataclass(frozen=True)
@@ -44,17 +81,16 @@ class Grid:
     lon: float
     lat: float
     points: t.List[Point]
-    hull: t.Optional[np.ndarray]
+    graph: t.Optional[nx.Graph]
 
     @classmethod
     def create(
         cls,
         coords: Coords,
         points: t.List[Point],
-        hull: t.Optional[np.ndarray] = None
     ) -> 'Grid':
         lon, lat = coords
-        return cls(lon=lon, lat=lat, points=points, hull=hull)
+        return cls(lon=lon, lat=lat, points=points, graph=None)
 
     def quandrant_bearing(self, lon: float, lat: float) -> constants.Quadrant:
         if lat >= self.lat:
@@ -79,14 +115,39 @@ class Grid:
     def array(self) -> np.ndarray:
         return np.array([p.array() for p in self.points])
 
-    def calculate_hull(self) -> 'Grid':
-        hull = np.array(convex_hull(self.array()))
-        return Grid.create(self.coords, self.points, hull)
+    def bounds(
+        self,
+    ) -> t.List[Coords]:
+        lon, lat = self.map_coords
+        lon1, lat1 = lon - RADIUS, lat + RADIUS
+        lon2, lat2 = lon + RADIUS, lat - RADIUS
+        if lon1 < 0.0 and lon2 == 0.0:
+            lon2 = -0.00000000001
+        return [(lon1, lat1),
+                (lon2, lat1),
+                (lon2, lat2),
+                (lon1, lat2)]
+
+    def zoom(self):
+        lon, lat = self.map_coords
+        lon1, lat1 = lon - RADIUS, lat - RADIUS
+        lon2, lat2 = lon + RADIUS, lat + RADIUS
+        return (lon, lat), (lon1, lat1), (lon2, lat2)
+
+    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords], t.List[Segment]]:
+        return (
+            (self.bounds(), RADIUS),
+            [n.map_coords for n in self.graph.nodes()],
+            [[a.map_coords, b.map_coords] for a, b in list(self.graph.edges())],
+        )
+
+    def set_graph(self, graph: nx.Graph) -> 'Grid':
+        return replace(self, graph=graph)
 
 
 def _initial_grid_coords(lon: float, lat: float) -> Coords:
-    return (math.trunc(lon) + (-0.5 if lon < 0.0 else 0.5),
-            math.trunc(lat) + (-0.5 if lat < 0.0 else 0.5))
+    return (math.trunc(lon) + (-RADIUS if lon < 0.0 else RADIUS),
+            math.trunc(lat) + (-RADIUS if lat < 0.0 else RADIUS))
 
 
 def _euc_2d_parser(coord: str) -> float:
@@ -131,10 +192,10 @@ def _read_points(
     for read_line in fh:
         try:
             id_, lat, lon = read_line.strip().split(" ")
-            point = Point(int(id_), coord_parser(lon), coord_parser(lat), None)
+            point = create_point(int(id_), coord_parser(lon), coord_parser(lat), None)
             points = coordinates.setdefault(point.coords, [])
             points.append(point)
         except ValueError:
             pass
-    return [first.merge_duplicates(rest)
+    return [first.merge_duplicates(tuple(rest))
             for first, *rest in coordinates.values()]
