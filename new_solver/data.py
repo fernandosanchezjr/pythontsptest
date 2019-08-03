@@ -1,8 +1,8 @@
-import itertools
 import logging
 import typing as t
 from operator import itemgetter
 
+import itertools
 import math
 import networkx as nx
 import numpy as np
@@ -14,6 +14,7 @@ from new_solver import constants, util
 logger = logging.getLogger(__name__)
 COORD_DELIMITER = "NODE_COORD_SECTION"
 RADIUS = 0.5
+GRID_RADIUS = 1.0
 
 Coords = t.Tuple[float, float]
 NPCoords = t.List[float]
@@ -82,6 +83,9 @@ class Grid:
     lat: float
     points: t.List[Point]
     graph: t.Optional[nx.Graph]
+    hull: t.Optional[t.List[Point]]
+    neighbors: t.Optional[t.List[Coords]]
+    depth: int = 0
 
     @classmethod
     def create(
@@ -90,7 +94,7 @@ class Grid:
         points: t.List[Point],
     ) -> 'Grid':
         lon, lat = coords
-        return cls(lon=lon, lat=lat, points=points, graph=None)
+        return cls(lon=lon, lat=lat, points=points, graph=None, hull=None, neighbors=None)
 
     def quandrant_bearing(self, lon: float, lat: float) -> constants.Quadrant:
         if lat >= self.lat:
@@ -117,10 +121,12 @@ class Grid:
 
     def bounds(
         self,
+        radius: float = RADIUS,
+        map: bool = True,
     ) -> t.List[Coords]:
-        lon, lat = self.map_coords
-        lon1, lat1 = lon - RADIUS, lat + RADIUS
-        lon2, lat2 = lon + RADIUS, lat - RADIUS
+        lon, lat = self.map_coords if map else self.coords
+        lon1, lat1 = lon - radius, lat + radius
+        lon2, lat2 = lon + radius, lat - radius
         if lon1 < 0.0 and lon2 == 0.0:
             lon2 = -0.00000000001
         return [(lon1, lat1),
@@ -128,10 +134,20 @@ class Grid:
                 (lon2, lat2),
                 (lon1, lat2)]
 
-    def zoom(self):
+    def bounding_grids(self, radius: float = GRID_RADIUS) -> t.Set[Coords]:
+        (lon1, lat1), _, (lon2, lat2), _ = self.bounds(radius=radius, map=False)
+        lon_range = np.arange(lon1, lon2 + GRID_RADIUS, GRID_RADIUS).tolist()
+        lat_range = np.arange(lat2 - GRID_RADIUS, lat1, GRID_RADIUS).tolist()
+        left = list(zip([lon_range[0]] * len(lat_range), lat_range))
+        right = list(zip(lon_range[-1:] * len(lat_range), lat_range))
+        top = list(zip(lon_range, [lat_range[0]] * len(lon_range)))
+        bottom = list(zip(lon_range, lat_range[-1:] * len(lon_range)))
+        return set(left + top + right + bottom)
+
+    def zoom(self, radius: float = RADIUS):
         lon, lat = self.map_coords
-        lon1, lat1 = lon - RADIUS, lat - RADIUS
-        lon2, lat2 = lon + RADIUS, lat + RADIUS
+        lon1, lat1 = lon - radius, lat - radius
+        lon2, lat2 = lon + radius, lat + radius
         return (lon, lat), (lon1, lat1), (lon2, lat2)
 
     def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords], t.List[Segment]]:
@@ -143,6 +159,15 @@ class Grid:
 
     def set_graph(self, graph: nx.Graph) -> 'Grid':
         return replace(self, graph=graph)
+
+    def set_hull(self, hull: t.Optional[t.List[Point]]) -> 'Grid':
+        return replace(self, hull=hull)
+
+    def set_neighbors(self, neighbors: t.Optional[t.List[Coords]]) -> 'Grid':
+        return replace(self, neighbors=neighbors)
+
+    def set_depth(self, depth: int) -> 'Grid':
+        return replace(self, depth=depth)
 
 
 def _initial_grid_coords(lon: float, lat: float) -> Coords:

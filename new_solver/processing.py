@@ -1,10 +1,11 @@
 import asyncio
-import itertools
 import logging
 import typing as t
 from concurrent import futures
+from functools import reduce
 from operator import itemgetter
 
+import itertools
 import networkx as nx
 import numpy as np
 import psutil
@@ -71,17 +72,24 @@ def extract_hull(points: t.List[data.Point]) -> t.Tuple[t.List[data.Point], t.Li
     return list(map(itemgetter(2), hull_points)), list(map(itemgetter(2), non_hull_points))
 
 
-def _do_convex_hull(grid: data.Grid) -> data.Grid:
+def calculate_hulls(grid: data.Grid) -> data.Grid:
     g = nx.Graph()
     all_points = grid.points
     depth = 0
+    all_hulls = []
     while len(all_points) > 2:
         hull, all_points = extract_hull(all_points)
+        for o in hull or all_hulls[-1:]:
+            for c in all_points:
+                g.add_edge(o, c, weight=o.distance_to(c), depth=depth, single=False)
         if not hull:
             break
+        all_hulls.append(hull)
         for a, b in zip(hull, hull[1:]):
             g.add_edge(a, b, weight=a.distance_to(b), depth=depth, single=False)
         depth += 1
+
+    all_hulls.append(all_points)
 
     if len(all_points) == 2:
         a, b = all_points
@@ -91,17 +99,35 @@ def _do_convex_hull(grid: data.Grid) -> data.Grid:
     elif len(all_points) == 1:
         g.add_node(all_points[0], depth=depth, single=True)
 
-    return grid.set_graph(g)
+    return grid.set_graph(g).set_hull(all_hulls[0]).set_depth(depth)
 
 
-def convex_hulls(processor: Processor, grids: t.List[data.Grid]) -> t.List[data.Grid]:
-    return processor.process(_do_convex_hull, grids)
+def outer_route(params: t.Tuple[data.Grid, t.Set[data.Coords]]) -> data.Grid:
+    grid, all_grid_coords = params
+    radius = data.GRID_RADIUS
+    neighbors = []
+    g = nx.Graph()
+    while len(neighbors) < 4:
+        bounding_grids = grid.bounding_grids(radius=radius)
+        neighbors.extend([b for b in bounding_grids if b in all_grid_coords])
+    g.add_cycle(grid.hull)
+    return grid.set_neighbors(neighbors), g
 
+
+def reduce_grids(main_grid: t.Optional[nx.Graph], g: nx.Graph) -> nx.Graph:
+    if not main_grid:
+        return g
+    return main_grid.add_edges_from(g.edges())
 
 @util.timeit
-def process_grids(grids: t.List[data.Grid]) -> t.List[data.Grid]:
+def process_grids(grids: t.List[data.Grid]) -> t.Tuple[t.List[data.Grid]]:
     proc = Processor()
-    return convex_hulls(proc, grids)
+    grids = proc.process(calculate_hulls, grids)
+    all_grid_coords = {g.coords for g in grids}
+    grids_and_graphs = proc.process(outer_route, [(g, all_grid_coords) for g in grids])
+    grids, graphs = zip(*grids_and_graphs)
+    main_graph = reduce(reduce_grids, graphs, None)
+    return grids, main_graph
 
 
 @util.timeit
@@ -128,7 +154,7 @@ def load(show_map: bool = False):
     startup_args = args.parse_args()
     logger.info("Loading %s", startup_args.datafile)
     name, grids = data.load_datafile(startup_args.datafile)
-    grids = process_grids(grids)
+    grids, main_graph = process_grids(grids)
     if show_map:
         m = draw_map(name, grids)
         m.show()
