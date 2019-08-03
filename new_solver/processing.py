@@ -1,11 +1,11 @@
 import asyncio
+import itertools
 import logging
 import typing as t
 from concurrent import futures
 from functools import reduce
 from operator import itemgetter
 
-import itertools
 import networkx as nx
 import numpy as np
 import psutil
@@ -102,7 +102,7 @@ def calculate_hulls(grid: data.Grid) -> data.Grid:
     return grid.set_graph(g).set_hull(all_hulls[0]).set_depth(depth)
 
 
-def outer_route(params: t.Tuple[data.Grid, t.Set[data.Coords]]) -> data.Grid:
+def build_search_graph(params: t.Tuple[data.Grid, t.Set[data.Coords]]) -> t.Tuple[data.Grid, nx.Graph]:
     grid, all_grid_coords = params
     radius = data.GRID_RADIUS
     neighbors = []
@@ -115,18 +115,18 @@ def outer_route(params: t.Tuple[data.Grid, t.Set[data.Coords]]) -> data.Grid:
 
 
 def reduce_grids(main_grid: t.Optional[nx.Graph], g: nx.Graph) -> nx.Graph:
-    if not main_grid:
-        return g
-    return main_grid.add_edges_from(g.edges())
+    main_grid.add_edges_from(g.edges())
+    return main_grid
+
 
 @util.timeit
-def process_grids(grids: t.List[data.Grid]) -> t.Tuple[t.List[data.Grid]]:
+def process_grids(grids: t.List[data.Grid]) -> t.Tuple[t.List[data.Grid], nx.Graph]:
     proc = Processor()
     grids = proc.process(calculate_hulls, grids)
     all_grid_coords = {g.coords for g in grids}
-    grids_and_graphs = proc.process(outer_route, [(g, all_grid_coords) for g in grids])
+    grids_and_graphs = proc.process(build_search_graph, [(g, all_grid_coords) for g in grids])
     grids, graphs = zip(*grids_and_graphs)
-    main_graph = reduce(reduce_grids, graphs, None)
+    main_graph = reduce(reduce_grids, graphs, nx.Graph(type='master'))
     return grids, main_graph
 
 
@@ -134,6 +134,7 @@ def process_grids(grids: t.List[data.Grid]) -> t.Tuple[t.List[data.Grid]]:
 def draw_map(
     name: str,
     grids: t.Iterable[data.Grid],
+    intergrid_graph: nx.Graph,
     center: data.Coords = (0, 0),
     bottom_left: data.Coords = (-180, -90),
     top_right: data.Coords = (180, 90),
@@ -145,7 +146,8 @@ def draw_map(
         drawn_grids.append(bounds)
         points.extend(new_points)
         segments.extend(new_segments)
-    m.draw_data(drawn_grids, points, segments)
+    intergrid_segments = [[a.map_coords, b.map_coords] for a, b in list(intergrid_graph.edges())]
+    m.draw_data(drawn_grids, points, segments, intergrid_segments)
     return m
 
 
@@ -156,7 +158,7 @@ def load(show_map: bool = False):
     name, grids = data.load_datafile(startup_args.datafile)
     grids, main_graph = process_grids(grids)
     if show_map:
-        m = draw_map(name, grids)
+        m = draw_map(name, grids, main_graph)
         m.show()
     return grids
 

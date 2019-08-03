@@ -72,10 +72,10 @@ class Map:
                      zorder=3.0)
 
     @staticmethod
-    def plot_segments(segments: SegmentCoords):
+    def plot_segments(segments: SegmentCoords, colors: str = 'green'):
         if segments:
             gca = plt.gca()
-            gca.add_collection(LineCollection(segments, colors='green',
+            gca.add_collection(LineCollection(segments, colors=colors,
                                               linewidths=0.75,
                                               linestyles='solid', zorder=4))
 
@@ -111,15 +111,18 @@ class Map:
         self,
         grids: Grids,
         points: Points = None,
-        segments: Segments = None
+        segments: Segments = None,
+        intergrid_segments: Segments = None
     ):
         map_grids = self.grids_to_map(grids)
         map_points = self.points_to_map(points)
         map_segments = self.segments_to_map(segments)
+        map_intergrid_segments = self.segments_to_map(intergrid_segments)
         plt.figure(self.fig.number)
         self.plot_grids(map_grids)
         self.plot_points(map_points)
         self.plot_segments(map_segments)
+        self.plot_segments(map_intergrid_segments, colors='yellow')
 
     def save(self, file_name="graph.eps", file_format="eps"):
         plt.figure(self.fig.number)
