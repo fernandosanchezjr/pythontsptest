@@ -3,7 +3,6 @@ import itertools
 import logging
 import typing as t
 from concurrent import futures
-from functools import reduce
 from operator import itemgetter
 
 import networkx as nx
@@ -75,7 +74,7 @@ def extract_hull(points: t.List[data.Point]) -> t.Tuple[t.List[data.Point], t.Li
 def calculate_hulls(grid: data.Grid) -> data.Grid:
     g = nx.Graph()
     all_points = grid.points
-    depth = 0
+    depth = 1
     all_hulls = []
     while len(all_points) > 2:
         hull, all_points = extract_hull(all_points)
@@ -102,16 +101,22 @@ def calculate_hulls(grid: data.Grid) -> data.Grid:
     return grid.set_graph(g).set_hull(all_hulls[0]).set_depth(depth)
 
 
-def build_search_graph(params: t.Tuple[data.Grid, t.Set[data.Coords]]) -> t.Tuple[data.Grid, nx.Graph]:
+def build_search_graph(
+    params: t.Tuple[data.Grid, t.Dict[data.Coords, t.List[data.Point]]]
+) -> data.Grid:
     grid, all_grid_coords = params
     radius = data.GRID_RADIUS
     neighbors = []
-    g = nx.Graph()
     while len(neighbors) < 4:
         bounding_grids = grid.bounding_grids(radius=radius)
-        neighbors.extend([b for b in bounding_grids if b in all_grid_coords])
-    g.add_cycle(grid.hull)
-    return grid.set_neighbors(neighbors), g
+        for b in bounding_grids:
+            if b in all_grid_coords:
+                neighbors.extend(all_grid_coords[b])
+        radius += data.GRID_RADIUS
+    for h in grid.hull:
+        for n in neighbors:
+            grid.graph.add_edge(h, n, weight=h.distance_to(n), depth=0, hull=True)
+    return grid.set_neighbors(neighbors)
 
 
 def reduce_grids(main_grid: t.Optional[nx.Graph], g: nx.Graph) -> nx.Graph:
@@ -120,34 +125,35 @@ def reduce_grids(main_grid: t.Optional[nx.Graph], g: nx.Graph) -> nx.Graph:
 
 
 @util.timeit
-def process_grids(grids: t.List[data.Grid]) -> t.Tuple[t.List[data.Grid], nx.Graph]:
-    proc = Processor()
+def process_grids(proc: Processor, grids: t.List[data.Grid]) -> t.Tuple[t.List[data.Grid], nx.Graph]:
     grids = proc.process(calculate_hulls, grids)
-    all_grid_coords = {g.coords for g in grids}
-    grids_and_graphs = proc.process(build_search_graph, [(g, all_grid_coords) for g in grids])
-    grids, graphs = zip(*grids_and_graphs)
-    main_graph = reduce(reduce_grids, graphs, nx.Graph(type='master'))
-    return grids, main_graph
+    all_grid_coords = {g.coords: g.hull for g in grids}
+    grids = proc.process(build_search_graph, [(g, all_grid_coords) for g in grids])
+    return grids
+
+
+def generate_grid_geometry(
+    grid: data.Grid
+) -> t.Tuple[t.Tuple[t.List[data.Coords], float], t.List[data.Coords], t.List[data.Segment], t.List[data.Segment]]:
+    return grid.map()
 
 
 @util.timeit
 def draw_map(
+    proc: Processor,
     name: str,
     grids: t.Iterable[data.Grid],
-    intergrid_graph: nx.Graph,
+    show_hull: bool = True,
     center: data.Coords = (0, 0),
     bottom_left: data.Coords = (-180, -90),
     top_right: data.Coords = (180, 90),
 ) -> graph.Map:
     m = graph.Map(f"{name} map", center=center, bottom_left=bottom_left, top_right=top_right)
-    drawn_grids, points, segments = [], [], []
-    for grid in grids:
-        bounds, new_points, new_segments = grid.map()
-        drawn_grids.append(bounds)
-        points.extend(new_points)
-        segments.extend(new_segments)
-    intergrid_segments = [[a.map_coords, b.map_coords] for a, b in list(intergrid_graph.edges())]
-    m.draw_data(drawn_grids, points, segments, intergrid_segments)
+    drawn_grids, points, non_hull, hull = zip(*proc.process(generate_grid_geometry, grids))
+    m.draw_grids(drawn_grids,
+                 list(itertools.chain.from_iterable(points)),
+                 list(itertools.chain.from_iterable(non_hull)),
+                 list(itertools.chain.from_iterable(hull)) if show_hull else None)
     return m
 
 
@@ -156,9 +162,10 @@ def load(show_map: bool = False):
     startup_args = args.parse_args()
     logger.info("Loading %s", startup_args.datafile)
     name, grids = data.load_datafile(startup_args.datafile)
-    grids, main_graph = process_grids(grids)
+    proc = Processor()
+    grids = process_grids(proc, grids)
     if show_map:
-        m = draw_map(name, grids, main_graph)
+        m = draw_map(proc, name, grids)
         m.show()
     return grids
 

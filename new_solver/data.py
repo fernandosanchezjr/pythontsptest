@@ -1,9 +1,9 @@
+import itertools
 import logging
+import math
 import typing as t
 from operator import itemgetter
 
-import itertools
-import math
 import networkx as nx
 import numpy as np
 from dataclasses import dataclass, replace
@@ -76,6 +76,8 @@ def create_point(_id: int, lon: float, lat: float, duplicates: t.Optional[t.Tupl
 
 Segment = t.List[Coords]
 
+DataEdge = t.Tuple[Point, Point, t.Dict[str, t.Any]]
+
 
 @dataclass(frozen=True)
 class Grid:
@@ -84,7 +86,7 @@ class Grid:
     points: t.List[Point]
     graph: t.Optional[nx.Graph]
     hull: t.Optional[t.List[Point]]
-    neighbors: t.Optional[t.List[Coords]]
+    neighbors: t.Optional[t.List[Point]]
     depth: int = 0
 
     @classmethod
@@ -122,9 +124,9 @@ class Grid:
     def bounds(
         self,
         radius: float = RADIUS,
-        map: bool = True,
+        to_map: bool = True,
     ) -> t.List[Coords]:
-        lon, lat = self.map_coords if map else self.coords
+        lon, lat = self.map_coords if to_map else self.coords
         lon1, lat1 = lon - radius, lat + radius
         lon2, lat2 = lon + radius, lat - radius
         if lon1 < 0.0 and lon2 == 0.0:
@@ -135,9 +137,9 @@ class Grid:
                 (lon1, lat2)]
 
     def bounding_grids(self, radius: float = GRID_RADIUS) -> t.Set[Coords]:
-        (lon1, lat1), _, (lon2, lat2), _ = self.bounds(radius=radius, map=False)
+        (lon1, lat1), _, (lon2, lat2), _ = self.bounds(radius=radius, to_map=False)
         lon_range = np.arange(lon1, lon2 + GRID_RADIUS, GRID_RADIUS).tolist()
-        lat_range = np.arange(lat2 - GRID_RADIUS, lat1, GRID_RADIUS).tolist()
+        lat_range = np.arange(lat2, lat1 + GRID_RADIUS, GRID_RADIUS).tolist()
         left = list(zip([lon_range[0]] * len(lat_range), lat_range))
         right = list(zip(lon_range[-1:] * len(lat_range), lat_range))
         top = list(zip(lon_range, [lat_range[0]] * len(lon_range)))
@@ -150,11 +152,14 @@ class Grid:
         lon2, lat2 = lon + radius, lat + radius
         return (lon, lat), (lon1, lat1), (lon2, lat2)
 
-    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords], t.List[Segment]]:
+    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords], t.List[Segment], t.List[Segment]]:
+        non_hull, hull = util.partition(lambda edge: edge[2].get('hull'),
+                                        self.graph.edges(data=True))
         return (
             (self.bounds(), RADIUS),
             [n.map_coords for n in self.graph.nodes()],
-            [[a.map_coords, b.map_coords] for a, b in list(self.graph.edges())],
+            [[a.map_coords, b.map_coords] for a, b, _ in list(non_hull)],
+            [[a.map_coords, b.map_coords] for a, b, _ in list(hull)],
         )
 
     def set_graph(self, graph: nx.Graph) -> 'Grid':
@@ -163,7 +168,7 @@ class Grid:
     def set_hull(self, hull: t.Optional[t.List[Point]]) -> 'Grid':
         return replace(self, hull=hull)
 
-    def set_neighbors(self, neighbors: t.Optional[t.List[Coords]]) -> 'Grid':
+    def set_neighbors(self, neighbors: t.Optional[t.List[Point]]) -> 'Grid':
         return replace(self, neighbors=neighbors)
 
     def set_depth(self, depth: int) -> 'Grid':
