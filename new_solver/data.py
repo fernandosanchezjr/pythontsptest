@@ -70,8 +70,14 @@ class Point:
         return geo_utils.mi_to_km(distance)
 
 
-def create_point(_id: int, lon: float, lat: float, duplicates: t.Optional[t.Tuple['Point']] = None) -> Point:
-    return Point(_id, lon, lat, math.radians(lon), math.radians(lat), duplicates)
+def create_point(
+    _id: int,
+    lon: float,
+    lat: float,
+    duplicates: t.Optional[t.Tuple['Point']] = None
+) -> Point:
+    return Point(_id, lon, lat, math.radians(lon), math.radians(lat),
+                 duplicates)
 
 
 Segment = t.List[Coords]
@@ -96,7 +102,8 @@ class Grid:
         points: t.List[Point],
     ) -> 'Grid':
         lon, lat = coords
-        return cls(lon=lon, lat=lat, points=points, graph=None, hull=None, neighbors=None)
+        return cls(lon=lon, lat=lat, points=points, graph=None, hull=None,
+                   neighbors=None)
 
     def quandrant_bearing(self, lon: float, lat: float) -> constants.Quadrant:
         if lat >= self.lat:
@@ -137,7 +144,8 @@ class Grid:
                 (lon1, lat2)]
 
     def bounding_grids(self, radius: float = GRID_RADIUS) -> t.Set[Coords]:
-        (lon1, lat1), _, (lon2, lat2), _ = self.bounds(radius=radius, to_map=False)
+        (lon1, lat1), _, (lon2, lat2), _ = self.bounds(radius=radius,
+                                                       to_map=False)
         lon_range = np.arange(lon1, lon2 + GRID_RADIUS, GRID_RADIUS).tolist()
         lat_range = np.arange(lat2, lat1 + GRID_RADIUS, GRID_RADIUS).tolist()
         left = list(zip([lon_range[0]] * len(lat_range), lat_range))
@@ -152,14 +160,15 @@ class Grid:
         lon2, lat2 = lon + radius, lat + radius
         return (lon, lat), (lon1, lat1), (lon2, lat2)
 
-    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords], t.List[Segment], t.List[Segment]]:
-        non_hull, hull = util.partition(lambda edge: edge[2].get('hull'),
-                                        self.graph.edges(data=True))
+    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords],
+                             t.List[Segment], t.List[Segment]]:
+        internal, external = util.partition(lambda edge: edge[2].get('external'),
+                                            self.graph.edges(data=True))
         return (
             (self.bounds(), RADIUS),
             [n.map_coords for n in self.graph.nodes()],
-            [[a.map_coords, b.map_coords] for a, b, _ in list(non_hull)],
-            [[a.map_coords, b.map_coords] for a, b, _ in list(hull)],
+            [[a.map_coords, b.map_coords] for a, b, _ in list(internal)],
+            [[a.map_coords, b.map_coords] for a, b, _ in list(external)],
         )
 
     def set_graph(self, graph: nx.Graph) -> 'Grid':
@@ -189,10 +198,12 @@ def load_datafile(path_name):
     with open(path_name) as fh:
         meta_data = _read_metadata(fh)
         name = meta_data.get("name")
-        edge_weight_type: constants.EdgeWeightType = meta_data.get("edge_weight_type", constants.EdgeWeightType.EUC_2D)
+        edge_weight_type: constants.EdgeWeightType = meta_data.get(
+            "edge_weight_type", constants.EdgeWeightType.EUC_2D)
         points = _read_points(fh, edge_weight_type)
 
-    points_by_grid = sorted(((_initial_grid_coords(p.lon, p.lat), p) for p in points),
+    points_by_grid = sorted(((_initial_grid_coords(p.lon, p.lat), p)
+                             for p in points),
                             key=itemgetter(0))
     grids = [Grid.create(g, list(map(itemgetter(1), ps)))
              for (g, ps) in itertools.groupby(points_by_grid, itemgetter(0))]
@@ -222,7 +233,8 @@ def _read_points(
     for read_line in fh:
         try:
             id_, lat, lon = read_line.strip().split(" ")
-            point = create_point(int(id_), coord_parser(lon), coord_parser(lat), None)
+            point = create_point(int(id_), coord_parser(lon),
+                                 coord_parser(lat), None)
             points = coordinates.setdefault(point.coords, [])
             points.append(point)
         except ValueError:

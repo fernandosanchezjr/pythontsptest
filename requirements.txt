@@ -9,3 +9,4 @@ jupyter
 nest-asyncio==1.0.0
 networkx==2.2
 dataclasses==0.6
+shapely==1.6.4

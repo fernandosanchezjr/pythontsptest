@@ -41,8 +41,10 @@ class Map:
                                  urcrnrlon=urcrnrlon, urcrnrlat=urcrnrlat)
         # plot coastlines, draw label meridians and parallels.
         self.world_map.drawcoastlines()
-        self.world_map.drawparallels(np.arange(-90, 90, 30), labels=[1, 0, 0, 0])
-        self.world_map.drawmeridians(np.arange(self.world_map.lonmin, self.world_map.lonmax + 30, 60),
+        self.world_map.drawparallels(np.arange(-90, 90, 30),
+                                     labels=[1, 0, 0, 0])
+        self.world_map.drawmeridians(np.arange(self.world_map.lonmin,
+                                               self.world_map.lonmax + 30, 60),
                                      labels=[0, 0, 0, 1])
         # fill continents 'coral' (with zorder=0), color wet areas 'aqua'
         self.world_map.drawmapboundary(fill_color='aqua')
@@ -53,7 +55,8 @@ class Map:
     def to_map_xy(self, entries: t.List[data.Coords]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
         x, y = bounds.T
-        x, y = self.world_map.shiftdata(x, datain=y, lon_0=self.center[0], fix_wrap_around=True)
+        x, y = self.world_map.shiftdata(x, datain=y, lon_0=self.center[0],
+                                        fix_wrap_around=True)
         return self.world_map(x, y)
 
     @staticmethod
@@ -111,13 +114,15 @@ class Map:
         self,
         grids: Grids,
         points: Points = None,
-        segments: Segments = None,
-        hull_segments: Segments = None
+        internal_segments: Segments = None,
+        external_segments: Segments = None
     ):
         map_grids = self.grids_to_map(grids)
         map_points = self.points_to_map(points) if points else []
-        map_segments = self.segments_to_map(segments) if segments else []
-        map_hull_segments = self.segments_to_map(hull_segments) if hull_segments else []
+        map_segments = (self.segments_to_map(internal_segments)
+                        if internal_segments else [])
+        map_hull_segments = (self.segments_to_map(external_segments)
+                             if external_segments else [])
         plt.figure(self.fig.number)
         self.plot_grids(map_grids)
         self.plot_points(map_points)
@@ -135,7 +140,8 @@ class Map:
 
 if __name__ == "__main__":
     m = Map("test!")
-    ps = m.points_to_map([data.Point(2360, -54.2666667, -66.7666667).map_coords,
-                          data.Point(6409, -54.45, -66.5).map_coords])
+    ps = m.points_to_map([
+        data.Point(2360, -54.2666667, -66.7666667).map_coords,
+        data.Point(6409, -54.45, -66.5).map_coords])
     m.plot_points(ps)
     m.save()
