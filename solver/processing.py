@@ -84,6 +84,11 @@ def _subdivide_and_join(grid: data.Grid) -> data.Grid:
     return grid
 
 
+def _subdivide(grid: data.Grid) -> data.Grid:
+    grid.subdivide()
+    return grid
+
+
 class Processor(BaseProcessor):
 
     @classmethod

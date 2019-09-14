@@ -20,6 +20,22 @@ Coords = t.Tuple[float, float]
 NPCoords = t.List[float]
 
 
+def fix_longitude(lon: float) -> float:
+    if lon > 180.0:
+        return lon % -180.0
+    elif lon < 180.0:
+        return lon % 180.0
+    return lon
+
+
+def fix_latitude(lat: float) -> float:
+    if lat > 90.0:
+        return lat % -90.0
+    if lat < -90.0:
+        return lat % 90.0
+    return lat
+
+
 @dataclass(frozen=True)
 class Point:
     id_: int
@@ -93,7 +109,9 @@ class Grid:
     graph: t.Optional[nx.Graph]
     hull: t.Optional[t.List[Point]]
     neighbors: t.Optional[t.List[Point]]
+    parent_coords: Coords
     depth: int = 0
+    radius: float = constants.INITIAL_RADIUS
 
     @classmethod
     def create(
@@ -103,7 +121,7 @@ class Grid:
     ) -> 'Grid':
         lon, lat = coords
         return cls(lon=lon, lat=lat, points=points, graph=None, hull=None,
-                   neighbors=None)
+                   neighbors=None, parent_coords=(lon, lat))
 
     def quandrant_bearing(self, lon: float, lat: float) -> constants.Quadrant:
         if lat >= self.lat:
@@ -130,20 +148,36 @@ class Grid:
 
     def bounds(
         self,
-        radius: float = RADIUS,
+        radius: t.Optional[float] = None,
         to_map: bool = True,
     ) -> t.List[Coords]:
+        _radius = radius or self.radius
         lon, lat = self.map_coords if to_map else self.coords
-        lon1, lat1 = lon - radius, lat + radius
-        lon2, lat2 = lon + radius, lat - radius
+        lon1, lat1 = fix_longitude(lon - _radius), fix_latitude(lat + _radius)
+        lon2, lat2 = fix_longitude(lon + _radius), fix_latitude(lat - _radius)
         if lon1 < 0.0 and lon2 == 0.0:
             lon2 = -0.00000000001
+        elif lon1 == 180.0:
+            lon1 = -179.99999999999
+        elif lon2 == -180.0:
+            lon2 = -179.99999999999
         return [(lon1, lat1),
                 (lon2, lat1),
                 (lon2, lat2),
                 (lon1, lat2)]
 
-    def bounding_grids(self, radius: float = GRID_RADIUS) -> t.Set[Coords]:
+    def sub_quadrants(self) -> (t.Tuple[float, t.Tuple[Coords,
+                                                       Coords,
+                                                       Coords,
+                                                       Coords]]):
+        new_radius = self.radius / 2.0
+        return (new_radius,
+                ((self.lon + new_radius, self.lat + new_radius),
+                 (self.lon - new_radius, self.lat + new_radius),
+                 (self.lon - new_radius, self.lat - new_radius),
+                 (self.lon + new_radius, self.lat - new_radius)))
+
+    def bounding_grids(self, radius: t.Optional[float] = None) -> t.Set[Coords]:
         (lon1, lat1), _, (lon2, lat2), _ = self.bounds(radius=radius,
                                                        to_map=False)
         lon_range = np.arange(lon1, lon2 + GRID_RADIUS, GRID_RADIUS).tolist()
@@ -154,10 +188,46 @@ class Grid:
         bottom = list(zip(lon_range, lat_range[-1:] * len(lon_range)))
         return set(left + top + right + bottom)
 
-    def zoom(self, radius: float = RADIUS):
+    def redistribute(
+        self,
+        point: Point,
+        quadrants: t.Tuple[Coords, Coords, Coords, Coords],
+    ):
+        bearing = self.quandrant_bearing(point.lon, point.lat)
+        return (quadrants[bearing], bearing), point
+
+    def subdivide(
+        self,
+        parent_coords: t.Optional[Coords] = None
+    ) -> t.List['Grid']:
+        if not parent_coords:
+            parent_coords = self.coords
+        if len(self.points) <= constants.MAX_GRID_DENSITY:
+            return [self]
+        new_radius, quadrant_coords = self.sub_quadrants()
+        new_depth = self.depth + 1
+        redistributed_points = (self.redistribute(p, quadrant_coords)
+                                for p in self.points)
+        grouped_points = itertools.groupby(sorted(redistributed_points,
+                                                  key=itemgetter(0)),
+                                           key=itemgetter(0))
+        new_contents = [Grid(lon, lat, list(map(itemgetter(1), points)),
+                             radius=new_radius, depth=new_depth, graph=None,
+                             hull=None, neighbors=None,
+                             parent_coords=parent_coords)
+                        for ((lon, lat), bearing), points in grouped_points]
+        results = []
+        for c in new_contents:
+            if isinstance(c, Grid):
+                results.extend(c.subdivide(parent_coords=parent_coords))
+
+        return results
+
+    def zoom(self, radius: t.Optional[float] = None):
+        _radius = radius or self.radius
         lon, lat = self.map_coords
-        lon1, lat1 = lon - radius, lat - radius
-        lon2, lat2 = lon + radius, lat + radius
+        lon1, lat1 = lon - _radius, lat - _radius
+        lon2, lat2 = lon + _radius, lat + _radius
         return (lon, lat), (lon1, lat1), (lon2, lat2)
 
     def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords],
@@ -169,6 +239,13 @@ class Grid:
             [n.map_coords for n in self.graph.nodes()],
             [[a.map_coords, b.map_coords] for a, b, _ in list(internal)],
             [[a.map_coords, b.map_coords] for a, b, _ in list(external)],
+        )
+
+    def map_grid(self) -> t.Tuple[t.Tuple[t.List[Coords], float],
+                                  t.List[Coords]]:
+        return (
+            (self.bounds(), RADIUS),
+            [p.map_coords for p in self.points],
         )
 
     def set_graph(self, graph: nx.Graph) -> 'Grid':

@@ -263,12 +263,14 @@ class Grid(IndexPoint, Index):
             return
         new_radius, quadrant_coords = self.sub_quadrants()
         new_depth = self.depth + 1
-        redistributed_points = (self.redistribute(p, quadrant_coords)
-                                for p in self.contents if isinstance(p, IndexPoint))
+        redistributed_points = (
+            self.redistribute(p, quadrant_coords)
+            for p in self.contents if isinstance(p, IndexPoint))
         grouped_points = itertools.groupby(sorted(redistributed_points,
                                                   key=itemgetter(0)),
                                            key=itemgetter(0))
-        new_contents = [Grid(lat, lon, list(map(itemgetter(1), points)), radius=new_radius, depth=new_depth,
+        new_contents = [Grid(lat, lon, list(map(itemgetter(1), points)),
+                             radius=new_radius, depth=new_depth,
                              id_=(self.id_ * 10) + bearing)
                         for ((lat, lon), bearing), points in grouped_points]
         for c in new_contents:
@@ -283,22 +285,27 @@ class Grid(IndexPoint, Index):
         local = []
         if not child and self.is_ending:
             local = [self]
-        return itertools.chain(local, terminal_grids, itertools.chain.from_iterable((c.terminals(child=True)
-                                                                                     for c in grids)))
+        return itertools.chain(local, terminal_grids,
+                               itertools.chain.from_iterable(
+                                   (c.terminals(child=True)
+                                    for c in grids)))
 
     def _get_graphs(self, child: bool = False) -> t.Iterable[nx.Graph]:
         grids = list(self.terminals(child=child))
         return itertools.chain(
             (self.graph,),
-            itertools.chain.from_iterable((c._get_graphs(child=True) for c in grids))
+            itertools.chain.from_iterable((c._get_graphs(child=True)
+                                           for c in grids))
         )
 
     def join_graphs(self) -> nx.Graph:
         new_graph = nx.Graph()
         all_graphs = self._get_graphs()
         for g in all_graphs:
-            new_graph.add_edges_from(g.edges(data=True), depth=g.graph.get('depth'))
-            new_graph.add_nodes_from(g.nodes(data=True), depth=g.graph.get('depth'))
+            new_graph.add_edges_from(g.edges(data=True),
+                                     depth=g.graph.get('depth'))
+            new_graph.add_nodes_from(g.nodes(data=True),
+                                     depth=g.graph.get('depth'))
         return new_graph
 
     def find(self, func: t.Callable[[t.Any], bool]) -> t.Any:
@@ -323,7 +330,8 @@ class Grid(IndexPoint, Index):
         lon2, lat2 = lon + self.radius, lat + self.radius
         return (lon, lat), (lon1, lat1), (lon2, lat2)
 
-    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords], t.List[Segment]]:
+    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords],
+                             t.List[Segment]]:
         return (
             (self.bounds(), self.radius),
             [n.map_coords for n in self.graph.nodes()],

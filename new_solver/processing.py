@@ -185,7 +185,22 @@ def process_grids(
     all_grid_coords = {g.coords: g.hull for g in grids}
     grids = proc.process(build_search_graph, [(g, all_grid_coords)
                                               for g in grids])
+
     return grids
+
+
+def _subdivide_grid(grid: data.Grid) -> t.Tuple[data.Coords, t.List[data.Grid]]:
+    return grid.coords, grid.subdivide()
+
+
+@util.timeit
+def subdivide_grids(
+    proc: Processor,
+    grids: t.List[data.Grid],
+) -> t.List[data.Grid]:
+    grids_by_parent = dict(proc.process(_subdivide_grid, grids))
+    all_grids = list(itertools.chain.from_iterable(grids_by_parent.values()))
+    return all_grids
 
 
 def generate_grid_geometry(
@@ -217,15 +232,41 @@ def draw_map(
     return m
 
 
+def generate_map_grid(
+    grid: data.Grid
+) -> t.Tuple[t.Tuple[t.List[data.Coords], float], t.List[data.Coords]]:
+    return grid.map_grid()
+
+
+@util.timeit
+def draw_grid_map(
+    proc: Processor,
+    name: str,
+    grids: t.List[data.Grid],
+    center: data.Coords = (0, 0),
+    bottom_left: data.Coords = (-180, -90),
+    top_right: data.Coords = (180, 90),
+) -> graph.Map:
+    m = graph.Map(f"{name} map", center=center, bottom_left=bottom_left,
+                  top_right=top_right)
+    drawn_grids, points = zip(*proc.process(
+        generate_map_grid, grids))
+    m.draw_grids(drawn_grids,
+                 list(itertools.chain.from_iterable(points)),
+                 [], [])
+    return m
+
+
 @util.timeit
 def load(show_map: bool = False):
     startup_args = args.parse_args()
     logger.info("Loading %s", startup_args.datafile)
     name, grids = data.load_datafile(startup_args.datafile)
     proc = Processor()
-    grids = process_grids(proc, grids)
+    grids = subdivide_grids(proc, grids)
+    logger.info("Subdivided into %s grids", len(grids))
     if show_map:
-        m = draw_map(proc, name, grids)
+        m = draw_grid_map(proc, name, grids)
         m.show()
     return grids
 

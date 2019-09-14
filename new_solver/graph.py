@@ -1,8 +1,11 @@
 import typing as t
 
+import matplotlib
+
+matplotlib.use('TkAgg')  # <-- THIS MAKES IT FAST!
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.collections import LineCollection, PolyCollection
+from matplotlib.collections import (LineCollection, PolyCollection)
 from mpl_toolkits.basemap import Basemap
 
 from solver import data, util
@@ -55,9 +58,8 @@ class Map:
     def to_map_xy(self, entries: t.List[data.Coords]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
         x, y = bounds.T
-        x, y = self.world_map.shiftdata(x, datain=y, lon_0=self.center[0],
-                                        fix_wrap_around=True)
-        return self.world_map(x, y)
+        return self.world_map(*self.world_map.shiftdata(
+            x, datain=y, lon_0=self.center[0], fix_wrap_around=True))
 
     @staticmethod
     def plot_grids(grids: GridCoords):
@@ -68,7 +70,7 @@ class Map:
 
     @staticmethod
     def plot_points(points: PointCoords, color='black',
-                    markersize=0.8):
+                    markersize=1.0):
         if points:
             x, y = points
             plt.plot(x, y, 'ok', markersize=markersize, color=color,
