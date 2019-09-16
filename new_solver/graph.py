@@ -69,7 +69,7 @@ class Map:
                 gca.add_collection(grid)
 
     @staticmethod
-    def plot_points(points: PointCoords, color='black',
+    def plot_points(points: PointCoords, color='yellow',
                     markersize=1.0):
         if points:
             x, y = points

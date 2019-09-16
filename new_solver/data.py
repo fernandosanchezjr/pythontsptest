@@ -23,7 +23,7 @@ NPCoords = t.List[float]
 def fix_longitude(lon: float) -> float:
     if lon > 180.0:
         return lon % -180.0
-    elif lon < 180.0:
+    elif lon < -180.0:
         return lon % 180.0
     return lon
 
@@ -59,12 +59,11 @@ class Point:
     def array(self) -> NPCoords:
         return [self.lon, self.lat]
 
-    def __eq__(self, other):
+    def __eq__(self, other: 'Point'):
         if isinstance(other, Point):
             return self.id_ == other.id_
-        return self == other
 
-    def distance_to(self, point):
+    def distance_to(self, point: 'Point'):
         """
         Calculate distance in miles or kilometers between current and other
         passed point.
@@ -146,13 +145,48 @@ class Grid:
     def array(self) -> np.ndarray:
         return np.array([p.array() for p in self.points])
 
+    def __eq__(self, other: 'Grid'):
+        if isinstance(other, Grid):
+            return self.coords == other.coords
+
+    def distance_to(self, grid):
+        """
+        Calculate distance in miles or kilometers between current and other
+        passed point.
+        """
+        assert isinstance(grid, Grid), (
+            'Other point should also be a Point instance.'
+        )
+        if self == grid:
+            return 0.0
+        coefficient = 69.09
+        theta = self.lon - grid.lon
+
+        rad_lat = math.radians(self.lat)
+        other_rad_lat = math.radians(grid.lat)
+
+        distance = math.degrees(math.acos(
+            math.sin(rad_lat) * math.sin(other_rad_lat) +
+            math.cos(rad_lat) * math.cos(other_rad_lat) *
+            math.cos(math.radians(theta))
+        )) * coefficient
+
+        return geo_utils.mi_to_km(distance)
+
     def bounds(
         self,
         radius: t.Optional[float] = None,
         to_map: bool = True,
+        from_parent: bool = False,
     ) -> t.List[Coords]:
         _radius = radius or self.radius
-        lon, lat = self.map_coords if to_map else self.coords
+        if to_map:
+            coords = self.map_coords
+        elif from_parent:
+            coords = self.parent_coords
+        else:
+            coords = self.coords
+        lon, lat = coords
         lon1, lat1 = fix_longitude(lon - _radius), fix_latitude(lat + _radius)
         lon2, lat2 = fix_longitude(lon + _radius), fix_latitude(lat - _radius)
         if lon1 < 0.0 and lon2 == 0.0:
@@ -177,16 +211,42 @@ class Grid:
                  (self.lon - new_radius, self.lat - new_radius),
                  (self.lon + new_radius, self.lat - new_radius)))
 
-    def bounding_grids(self, radius: t.Optional[float] = None) -> t.Set[Coords]:
-        (lon1, lat1), _, (lon2, lat2), _ = self.bounds(radius=radius,
-                                                       to_map=False)
-        lon_range = np.arange(lon1, lon2 + GRID_RADIUS, GRID_RADIUS).tolist()
-        lat_range = np.arange(lat2, lat1 + GRID_RADIUS, GRID_RADIUS).tolist()
+    def bounding_grids(
+        self,
+        radius: t.Optional[float] = None,
+        from_parent: bool = False,
+    ) -> t.Set[Coords]:
+        _radius = radius or self.radius
+        (lon1, lat1), _, (lon2, lat2), _ = self.bounds(
+            radius=_radius, to_map=False, from_parent=from_parent)
+        lon1, lon2 = sorted((lon1, lon2))
+        lat1, lat2 = sorted((lat1, lat2))
+        lon_range = np.arange(lon1, lon2 + _radius, _radius).tolist()
+        lat_range = np.arange(lat1, lat2 + _radius, _radius).tolist()
         left = list(zip([lon_range[0]] * len(lat_range), lat_range))
         right = list(zip(lon_range[-1:] * len(lat_range), lat_range))
         top = list(zip(lon_range, [lat_range[0]] * len(lon_range)))
         bottom = list(zip(lon_range, lat_range[-1:] * len(lon_range)))
         return set(left + top + right + bottom)
+
+    def get_neighbors(
+        self,
+        radius: float,
+        grids_by_parent: t.Dict[Coords, t.List['Grid']],
+    ):
+        result = []
+        bounding_grid_coords = self.bounding_grids(radius, from_parent=True)
+        for bgc in bounding_grid_coords:
+            result.extend(grids_by_parent.get(bgc, []))
+        return result
+
+    def contains(self, coords: Coords) -> bool:
+        lon, lat = coords
+        (lon1, lat1), _, (lon2, lat2), _ = self.bounds(radius=self.radius,
+                                                       to_map=False)
+        lon1, lon2 = sorted((lon1, lon2))
+        lat1, lat2 = sorted((lat1, lat2))
+        return lon1 <= lon < lon2 and lat1 <= lat <= lat2
 
     def redistribute(
         self,
@@ -232,8 +292,8 @@ class Grid:
 
     def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords],
                              t.List[Segment], t.List[Segment]]:
-        internal, external = util.partition(lambda edge: edge[2].get('external'),
-                                            self.graph.edges(data=True))
+        internal, external = util.partition(
+            lambda edge: edge[2].get('external'), self.graph.edges(data=True))
         return (
             (self.bounds(), RADIUS),
             [n.map_coords for n in self.graph.nodes()],
@@ -244,7 +304,7 @@ class Grid:
     def map_grid(self) -> t.Tuple[t.Tuple[t.List[Coords], float],
                                   t.List[Coords]]:
         return (
-            (self.bounds(), RADIUS),
+            (self.bounds(), self.radius),
             [p.map_coords for p in self.points],
         )
 

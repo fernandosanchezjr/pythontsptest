@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import itertools
 import logging
 import typing as t
@@ -10,13 +11,19 @@ import numpy as np
 import psutil
 from shapely import geometry
 
-from new_solver import args, convex_hull, graph, data, util
+from new_solver import args, constants, convex_hull, graph, data, util
 
 logger = logging.getLogger(__name__)
 
 
-async def _processor(executor, queue, func: (), args_list: t.List[t.Any]):
-    for f in executor.map(func, args_list):
+async def _processor(
+    executor,
+    queue,
+    func: (),
+    args_list: t.List[t.Any],
+    **kwargs: t.Dict[t.Any, t.Any]
+):
+    for f in executor.map(functools.partial(func, **kwargs), args_list):
         await queue.put(f)
 
 
@@ -47,9 +54,14 @@ class Processor:
         self._queue = asyncio.Queue()
         self.index = None
 
-    def process(self, func: (), args_list: t.List[t.Any]) -> t.List[t.Any]:
+    def process(
+        self,
+        func: (),
+        args_list: t.List[t.Any],
+        **kwargs: t.Dict[t.Any, t.Any],
+    ) -> t.List[t.Any]:
         _, results = self._loop.run_until_complete(asyncio.gather(
-            _processor(self._executor, self._queue, func, args_list),
+            _processor(self._executor, self._queue, func, args_list, **kwargs),
             _consumer(self._queue, len(args_list))
         ))
         return results
@@ -197,10 +209,10 @@ def _subdivide_grid(grid: data.Grid) -> t.Tuple[data.Coords, t.List[data.Grid]]:
 def subdivide_grids(
     proc: Processor,
     grids: t.List[data.Grid],
-) -> t.List[data.Grid]:
+) -> t.Tuple[t.Dict[data.Coords, t.List[data.Grid]], t.List[data.Grid]]:
     grids_by_parent = dict(proc.process(_subdivide_grid, grids))
     all_grids = list(itertools.chain.from_iterable(grids_by_parent.values()))
-    return all_grids
+    return grids_by_parent, all_grids
 
 
 def generate_grid_geometry(
@@ -220,7 +232,7 @@ def draw_map(
     bottom_left: data.Coords = (-180, -90),
     top_right: data.Coords = (180, 90),
 ) -> graph.Map:
-    m = graph.Map(f"{name} map", center=center, bottom_left=bottom_left,
+    m = graph.Map(f'{name} map', center=center, bottom_left=bottom_left,
                   top_right=top_right)
     drawn_grids, points, internal, external = zip(*proc.process(
         generate_grid_geometry, grids))
@@ -247,29 +259,59 @@ def draw_grid_map(
     bottom_left: data.Coords = (-180, -90),
     top_right: data.Coords = (180, 90),
 ) -> graph.Map:
-    m = graph.Map(f"{name} map", center=center, bottom_left=bottom_left,
+    m = graph.Map(f'{name} map', center=center, bottom_left=bottom_left,
                   top_right=top_right)
-    drawn_grids, points = zip(*proc.process(
-        generate_map_grid, grids))
-    m.draw_grids(drawn_grids,
-                 list(itertools.chain.from_iterable(points)),
+    drawn_grids, points = zip(*proc.process(generate_map_grid, grids))
+    m.draw_grids(drawn_grids, list(itertools.chain.from_iterable(points)),
                  [], [])
     return m
+
+
+def _evaluate_neighbors(
+    search_parameters: t.Tuple[data.Coords, t.List[data.Grid]],
+    grids_by_parent: t.Optional[t.Dict[data.Coords, t.List[data.Grid]]] = None,
+) -> t.Tuple[data.Coords, t.List[data.Grid]]:
+    coords, grids = search_parameters
+    parent_count = len(grids_by_parent)
+    for g in grids:
+        external_radius = data.GRID_RADIUS
+        if len(grids) == 1:
+            logger.info('Lone grid %s', g.coords)
+        candidate_neighbors = [(og, og.distance_to(g))
+                               for og in filter(lambda ng: ng != g, grids)]
+        while ((len(candidate_neighbors) < constants.MIN_RESULT_COUNT
+                and parent_count > 1) or external_radius == data.GRID_RADIUS):
+            neighbors = g.get_neighbors(external_radius, grids_by_parent)
+            candidate_neighbors.extend([(ng, ng.distance_to(g))
+                                        for ng in neighbors])
+            external_radius += data.GRID_RADIUS
+        # print('Candidates from', g.coords, len(candidate_neighbors))
+    return search_parameters
+
+
+@util.timeit
+def find_nearest_neighbors(
+    proc: Processor,
+    grids_by_parent: t.Dict[data.Coords, t.List[data.Grid]],
+):
+    result = proc.process(_evaluate_neighbors, list(grids_by_parent.items()),
+                          grids_by_parent=grids_by_parent)
 
 
 @util.timeit
 def load(show_map: bool = False):
     startup_args = args.parse_args()
-    logger.info("Loading %s", startup_args.datafile)
+    logger.info('Loading %s', startup_args.datafile)
     name, grids = data.load_datafile(startup_args.datafile)
     proc = Processor()
-    grids = subdivide_grids(proc, grids)
-    logger.info("Subdivided into %s grids", len(grids))
+    grids_by_parent, grids = subdivide_grids(proc, grids)
+    logger.info('Subdivided into %s grids', len(grids))
+    find_nearest_neighbors(proc, grids_by_parent)
     if show_map:
         m = draw_grid_map(proc, name, grids)
         m.show()
     return grids
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     load(True)
