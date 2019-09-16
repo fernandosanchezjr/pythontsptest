@@ -6,6 +6,15 @@ from os import path
 logger = logging.getLogger(__name__)
 
 
+def setup_logging():
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.addHandler(logging.StreamHandler())
+
+
+setup_logging()
+
+
 def get_relative_path(module: str, path_name: str) -> str:
     return path.abspath(path.join(path.dirname(module), path_name))
 

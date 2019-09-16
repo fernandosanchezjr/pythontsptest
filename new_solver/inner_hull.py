@@ -1,23 +1,26 @@
-import numpy as np
+from shapely.geometry import LineString
 
-T = np.array([[0, -1], [1, 0]])
+from new_solver import util
 
 
-def line_intersect(a1, a2, b1, b2):
-    da = np.atleast_2d(a2 - a1)
-    db = np.atleast_2d(b2 - b1)
-    dp = np.atleast_2d(a1 - b1)
-    dap = np.dot(da, T)
-    denom = np.sum(dap * db, axis=1)
-    num = np.sum(dap * dp, axis=1)
-    return np.atleast_2d(num / denom).T * db + b1
+@util.timeit
+def test_intersection(l1, l2):
+    l1.intersects(l2)
+
+
+@util.timeit
+def test_intersection2(l1, l2):
+    for _ in range(1000):
+        l1.intersects(l2)
 
 
 if __name__ == '__main__':
-    pa1 = np.array([[2.0, 2.0], [2.0, 2.0]])
-    pa2 = np.array([[0.0, 2.0], [-1.0, 2.0]])
-    pb1 = np.array([[1.0, 1.0], [1.0, 1.0]])
-    pb2 = np.array([[1.0, 3.0], [1.5, 3.0]])
+    line1 = LineString([(1.0, 1.0), (1.0, 3.0)])
+    line2 = LineString([(2.0, 2.0), (-1.0, 2.0)])
+    line3 = LineString([(2.0, 2.0), (1.0, 5.0)])
 
-    intersects = line_intersect(pa1, pa2, pb1, pb2)
-    print('intersects', intersects)
+    test_intersection(line1, line2)
+    test_intersection2(line1, line2)
+
+    print('intersects 1', line1.intersects(line2))
+    print('intersects 2', line1.intersects(line3))
