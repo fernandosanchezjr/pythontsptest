@@ -11,7 +11,8 @@ import numpy as np
 import psutil
 from shapely import geometry
 
-from new_solver import args, constants, convex_hull, graph, data, util
+from new_solver import (args, constants, convex_hull, data, graph, inner_hull,
+                        util)
 
 logger = logging.getLogger(__name__)
 
@@ -277,15 +278,13 @@ def _evaluate_neighbors(
         external_radius = data.GRID_RADIUS
         if len(grids) == 1:
             logger.info('Lone grid %s', g.coords)
-        candidate_neighbors = [(og, og.distance_to(g))
-                               for og in filter(lambda ng: ng != g, grids)]
+        candidate_neighbors = list(filter(lambda ng: ng != g, grids))
         while ((len(candidate_neighbors) < constants.MIN_RESULT_COUNT
                 and parent_count > 1) or external_radius == data.GRID_RADIUS):
             neighbors = g.get_neighbors(external_radius, grids_by_parent)
-            candidate_neighbors.extend([(ng, ng.distance_to(g))
-                                        for ng in neighbors])
+            candidate_neighbors.extend(neighbors)
             external_radius += data.GRID_RADIUS
-        # print('Candidates from', g.coords, len(candidate_neighbors))
+        neighbors = inner_hull.inner_hull(g, neighbors)
     return search_parameters
 
 

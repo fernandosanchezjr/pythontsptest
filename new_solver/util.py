@@ -12,9 +12,6 @@ def setup_logging():
     root.addHandler(logging.StreamHandler())
 
 
-setup_logging()
-
-
 def get_relative_path(module: str, path_name: str) -> str:
     return path.abspath(path.join(path.dirname(module), path_name))
 

@@ -1,26 +1,24 @@
+import typing as t
+from operator import itemgetter
+
 from shapely.geometry import LineString
 
-from new_solver import util
+from new_solver import data
 
 
-@util.timeit
-def test_intersection(l1, l2):
-    l1.intersects(l2)
-
-
-@util.timeit
-def test_intersection2(l1, l2):
-    for _ in range(1000):
-        l1.intersects(l2)
-
-
-if __name__ == '__main__':
-    line1 = LineString([(1.0, 1.0), (1.0, 3.0)])
-    line2 = LineString([(2.0, 2.0), (-1.0, 2.0)])
-    line3 = LineString([(2.0, 2.0), (1.0, 5.0)])
-
-    test_intersection(line1, line2)
-    test_intersection2(line1, line2)
-
-    print('intersects 1', line1.intersects(line2))
-    print('intersects 2', line1.intersects(line3))
+def inner_hull(
+    center: t.Union[data.Grid, data.Point],
+    neighbors: t.List[t.Union[data.Grid, data.Point]],
+) -> t.List[t.Union[data.Grid, data.Point]]:
+    distances = sorted(((n, n.distance_to(center)) for n in neighbors),
+                       key=itemgetter(1))
+    hull_grids = distances[:2]
+    distances = distances[2:]
+    while len(distances):
+        line = LineString([g.coords for g, _ in hull_grids])
+        distances = list(filter(
+            (lambda og: LineString([center.coords,
+                                    og[0].coords]).intersects(line) is False),
+            distances))
+        hull_grids.extend(distances[:1])
+    return [g for g, _ in hull_grids]
