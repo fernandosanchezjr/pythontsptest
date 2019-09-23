@@ -12,26 +12,43 @@ logger = logging.getLogger(__name__)
 
 GridCoords = t.List[PolyCollection]
 PointCoords = t.Optional[t.Tuple[t.Any, t.Any]]
-SegmentCoords = t.List[t.List[data.Coords]]
+SegmentCoords = t.List[t.List[data.Segment]]
 MapData = t.Tuple[GridCoords, PointCoords, SegmentCoords]
+
+Grids = t.List[t.Tuple[t.List[data.Coords], float]]
+Points = t.List[data.Coords]
+Segments = t.List[data.Segment]
 
 
 class Map:
     numbers = util.Numbers()
     title: t.Any
+    center: data.Coords
 
-    def __init__(self, title=""):
+    def __init__(
+        self,
+        title="",
+        center: data.Coords = (0, 0),
+        bottom_left: data.Coords = (-180, -90),
+        top_right: data.Coords = (180, 90),
+    ):
         self.title = title
         self.fig = plt.figure(self.title or self.numbers.next())
+        self.center = center
         # miller projection
-        self.world_map = Basemap(projection='mill', lon_0=180)
+        lon_0, lat_0 = center
+        llcrnrlon, llcrnrlat = bottom_left
+        urcrnrlon, urcrnrlat = top_right
+        self.world_map = Basemap(projection='mill', lon_0=lon_0, lat_0=lat_0,
+                                 llcrnrlon=llcrnrlon, llcrnrlat=llcrnrlat,
+                                 urcrnrlon=urcrnrlon, urcrnrlat=urcrnrlat)
         # plot coastlines, draw label meridians and parallels.
         self.world_map.drawcoastlines()
-        self.world_map.drawparallels(
-            np.arange(-90, 90, 30), labels=[1, 0, 0, 0])
-        self.world_map.drawmeridians(
-            np.arange(self.world_map.lonmin, self.world_map.lonmax + 30, 60),
-            labels=[0, 0, 0, 1])
+        self.world_map.drawparallels(np.arange(-90, 90, 30),
+                                     labels=[1, 0, 0, 0])
+        self.world_map.drawmeridians(np.arange(self.world_map.lonmin,
+                                               self.world_map.lonmax + 30, 60),
+                                     labels=[0, 0, 0, 1])
         # fill continents 'coral' (with zorder=0), color wet areas 'aqua'
         self.world_map.drawmapboundary(fill_color='aqua')
         self.world_map.fillcontinents(color='coral', lake_color='aqua')
@@ -41,6 +58,8 @@ class Map:
     def to_map_xy(self, entries: t.List[data.Coords]) -> t.Tuple[t.Any, t.Any]:
         bounds = np.array(entries)
         x, y = bounds.T
+        x, y = self.world_map.shiftdata(x, datain=y, lon_0=self.center[0],
+                                        fix_wrap_around=True)
         return self.world_map(x, y)
 
     @staticmethod
@@ -68,60 +87,45 @@ class Map:
 
         return
 
-    def grid_to_map(self, grid) -> PolyCollection:
-        return PolyCollection(np.dstack(self.to_map_xy(grid.bounds())),
-                              edgecolors='blue', facecolors='none',
-                              linewidths=1.0 + grid.radius, zorder=2.0)
+    def grids_to_map(
+        self,
+        grids: Grids
+    ) -> GridCoords:
+        return [PolyCollection(np.dstack(self.to_map_xy(bounds)),
+                               edgecolors='blue', facecolors='none',
+                               linewidths=1.0 + radius, zorder=2.0)
+                for bounds, radius in grids]
 
     def points_to_map(
         self,
-        points: t.List[data.Point]
+        points: t.List[data.Coords]
     ) -> PointCoords:
         if not points:
             return None
-        return self.to_map_xy([p.map_coords for p in points])
+        return self.to_map_xy(points)
 
     def segments_to_map(
         self,
-        segments: t.List[data.Segment]
+        segments: Segments
     ) -> SegmentCoords:
-        if not segments:
-            return []
         lines = []
         for s in segments:
-            lines.extend(np.dstack(self.to_map_xy(s.map_endpoints)))
+            lines.extend(np.dstack(self.to_map_xy(s)))
         return lines
-
-    def generate_data(
-        self,
-        grid: data.Grid
-    ) -> MapData:
-        terminals = []
-        points = []
-        segments = []
-        for terminal in grid.terminals():
-            terminals.append(self.grid_to_map(terminal))
-            for entry in terminal.contents:
-                if isinstance(entry, data.Point):
-                    points.append(entry)
-                elif isinstance(entry, data.Segment):
-                    segments.append(entry)
-                elif isinstance(entry, data.Cluster):
-                    points.extend(list(entry.points))
-                    segments.extend(list(entry.segments))
-        return terminals, self.points_to_map(points), self.segments_to_map(
-            segments)
 
     def draw_data(
         self,
-        grids: GridCoords,
-        points: PointCoords = None,
-        segments: SegmentCoords = None
+        grids: Grids,
+        points: Points = None,
+        segments: Segments = None
     ):
+        map_grids = self.grids_to_map(grids)
+        map_points = self.points_to_map(points)
+        map_segments = self.segments_to_map(segments)
         plt.figure(self.fig.number)
-        self.plot_grids(grids)
-        self.plot_points(points)
-        self.plot_segments(segments)
+        self.plot_grids(map_grids)
+        self.plot_points(map_points)
+        self.plot_segments(map_segments)
 
     def save(self, file_name="graph.eps", file_format="eps"):
         plt.figure(self.fig.number)
@@ -134,7 +138,7 @@ class Map:
 
 if __name__ == "__main__":
     m = Map("test!")
-    ps = m.points_to_map([data.Point(2360, -54.2666667, -66.7666667),
-                          data.Point(6409, -54.45, -66.5)])
+    ps = m.points_to_map([data.Point(2360, -54.2666667, -66.7666667).map_coords,
+                          data.Point(6409, -54.45, -66.5).map_coords])
     m.plot_points(ps)
     m.save()
