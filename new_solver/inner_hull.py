@@ -1,24 +1,18 @@
 import typing as t
-from operator import itemgetter
 
-from shapely.geometry import LineString
+from shapely.geometry import (MultiPolygon, Point as ShapelyPoint, Polygon)
 
 from new_solver import data
 
 
 def inner_hull(
     center: t.Union[data.Grid, data.Point],
-    neighbors: t.List[t.Union[data.Grid, data.Point]],
+    neighbor_points: t.Dict[data.Coords, t.Union[data.Grid, data.Point]],
+    triangulation: t.List[Polygon],
 ) -> t.List[t.Union[data.Grid, data.Point]]:
-    distances = sorted(((n, n.distance_to(center)) for n in neighbors),
-                       key=itemgetter(1))
-    hull_grids = distances[:2]
-    distances = distances[2:]
-    while len(distances):
-        line = LineString([g.coords for g, _ in hull_grids])
-        distances = list(filter(
-            (lambda og: LineString([center.coords,
-                                    og[0].coords]).intersects(line) is False),
-            distances))
-        hull_grids.extend(distances[:1])
-    return [g for g, _ in hull_grids]
+    center_point = ShapelyPoint(*center.coords)
+    polygons = MultiPolygon([tr for tr in triangulation
+                             if tr.touches(center_point)])
+    unique_coords = set([c for c in polygons.convex_hull.exterior.coords
+                         if c != center.coords])
+    return [neighbor_points[c] for c in unique_coords]

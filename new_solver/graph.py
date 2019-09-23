@@ -1,23 +1,16 @@
 import typing as t
 
 import matplotlib
-
-matplotlib.use('TkAgg')  # <-- THIS MAKES IT FAST!
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.collections import (LineCollection, PolyCollection)
+from matplotlib.collections import PathCollection
+from matplotlib.path import Path
 from mpl_toolkits.basemap import Basemap
+from shapely.geometry import MultiLineString
 
 from solver import data, util
 
-GridCoords = t.List[PolyCollection]
-PointCoords = t.Optional[t.Tuple[t.Any, t.Any]]
-SegmentCoords = t.List[t.List[data.Segment]]
-MapData = t.Tuple[GridCoords, PointCoords, SegmentCoords]
-
-Grids = t.List[t.Tuple[t.List[data.Coords], float]]
-Points = t.List[data.Coords]
-Segments = t.List[data.Segment]
+matplotlib.use('TkAgg')  # <-- THIS MAKES IT FAST!
 
 
 class Map:
@@ -42,6 +35,9 @@ class Map:
         self.world_map = Basemap(projection='mill', lon_0=lon_0, lat_0=lat_0,
                                  llcrnrlon=llcrnrlon, llcrnrlat=llcrnrlat,
                                  urcrnrlon=urcrnrlon, urcrnrlat=urcrnrlat)
+        self.draw_background()
+
+    def draw_background(self):
         # plot coastlines, draw label meridians and parallels.
         self.world_map.drawcoastlines()
         self.world_map.drawparallels(np.arange(-90, 90, 30),
@@ -52,84 +48,60 @@ class Map:
         # fill continents 'coral' (with zorder=0), color wet areas 'aqua'
         self.world_map.drawmapboundary(fill_color='aqua')
         self.world_map.fillcontinents(color='coral', lake_color='aqua')
-        if title:
+        if self.title:
             plt.title(self.title)
 
-    def to_map_xy(self, entries: t.List[data.Coords]) -> t.Tuple[t.Any, t.Any]:
+    def _to_map_xy(self, entries: t.List[data.Coords]) -> np.ndarray:
         bounds = np.array(entries)
         x, y = bounds.T
         return self.world_map(*self.world_map.shiftdata(
             x, datain=y, lon_0=self.center[0], fix_wrap_around=True))
 
-    @staticmethod
-    def plot_grids(grids: GridCoords):
-        if grids:
-            gca = plt.gca()
-            for grid in grids:
-                gca.add_collection(grid)
-
-    @staticmethod
-    def plot_points(points: PointCoords, color='yellow',
-                    markersize=1.0):
-        if points:
-            x, y = points
-            plt.plot(x, y, 'ok', markersize=markersize, color=color,
-                     zorder=3.0)
-
-    @staticmethod
-    def plot_segments(segments: SegmentCoords, colors: str = 'green'):
-        if segments:
-            gca = plt.gca()
-            gca.add_collection(LineCollection(segments, colors=colors,
-                                              linewidths=0.75,
-                                              linestyles='solid', zorder=4))
-
-        return
-
-    def grids_to_map(
+    def _lines_to_map_xy(
         self,
-        grids: Grids
-    ) -> GridCoords:
-        return [PolyCollection(np.dstack(self.to_map_xy(bounds)),
-                               edgecolors='blue', facecolors='none',
-                               linewidths=1.0 + radius, zorder=2.0)
-                for bounds, radius in grids]
+        entries: t.Tuple[np.ndarray, np.ndarray],
+    ) -> np.ndarray:
+        x, y = entries
+        new_x, new_y = self.world_map(
+            *self.world_map.shiftdata(
+                x, datain=y, lon_0=self.center[0], fix_wrap_around=True
+            )
+        )
+        return np.array(list(zip(new_x, new_y)))
 
-    def points_to_map(
+    def draw_lines(
         self,
-        points: t.List[data.Coords]
-    ) -> PointCoords:
-        if not points:
-            return None
-        return self.to_map_xy(points)
-
-    def segments_to_map(
-        self,
-        segments: Segments
-    ) -> SegmentCoords:
-        lines = []
-        for s in segments:
-            lines.extend(np.dstack(self.to_map_xy(s)))
-        return lines
-
-    def draw_grids(
-        self,
-        grids: Grids,
-        points: Points = None,
-        internal_segments: Segments = None,
-        external_segments: Segments = None
+        lines: MultiLineString,
+        colors: str = 'blue',
+        linestyles: str = 'solid',
+        linewidths: float = 1.0,
+        zorder: float = 1,
     ):
-        map_grids = self.grids_to_map(grids)
-        map_points = self.points_to_map(points) if points else []
-        map_segments = (self.segments_to_map(internal_segments)
-                        if internal_segments else [])
-        map_hull_segments = (self.segments_to_map(external_segments)
-                             if external_segments else [])
+        map_lines = [Path(np.array(self._lines_to_map_xy(g.xy)))
+                     for g in lines.geoms]
+        if not map_lines:
+            return
+        drawn_lines = PathCollection(
+            map_lines,
+            linewidths=linewidths,
+            edgecolors=colors,
+            facecolors='none',
+            linestyles=linestyles,
+            zorder=zorder)
         plt.figure(self.fig.number)
-        self.plot_grids(map_grids)
-        self.plot_points(map_points)
-        self.plot_segments(map_hull_segments, colors='yellow')
-        self.plot_segments(map_segments)
+        gca = plt.gca()
+        gca.add_collection(drawn_lines)
+
+    def draw_points(
+        self,
+        points: t.List[data.Coords],
+        color: str = 'yellow',
+        markersize: float = 1.0,
+        zorder: float = 1,
+    ):
+        x, y = self._to_map_xy(points)
+        plt.figure(self.fig.number)
+        plt.plot(x, y, 'ok', markersize=markersize, color=color, zorder=zorder)
 
     def save(self, file_name="graph.eps", file_format="eps"):
         plt.figure(self.fig.number)
@@ -138,12 +110,3 @@ class Map:
     @classmethod
     def show(cls):
         plt.show()
-
-
-if __name__ == "__main__":
-    m = Map("test!")
-    ps = m.points_to_map([
-        data.Point(2360, -54.2666667, -66.7666667).map_coords,
-        data.Point(6409, -54.45, -66.5).map_coords])
-    m.plot_points(ps)
-    m.save()

@@ -8,6 +8,7 @@ import networkx as nx
 import numpy as np
 from dataclasses import dataclass, replace
 from geoindex import utils as geo_utils
+from shapely.geometry import LinearRing, LineString
 
 from new_solver import constants, util
 
@@ -63,6 +64,18 @@ class Point:
         if isinstance(other, Point):
             return self.id_ == other.id_
 
+    def bearing(self, other: 'Point') -> constants.Quadrant:
+        if other.lat >= self.lat:
+            if other.lon >= self.lon:
+                return constants.Quadrant.Q_I
+            else:
+                return constants.Quadrant.Q_II
+        else:
+            if other.lon >= self.lon:
+                return constants.Quadrant.Q_IV
+            else:
+                return constants.Quadrant.Q_III
+
     def distance_to(self, point: 'Point'):
         """
         Calculate distance in miles or kilometers between current and other
@@ -106,8 +119,7 @@ class Grid:
     lat: float
     points: t.List[Point]
     graph: t.Optional[nx.Graph]
-    hull: t.Optional[t.List[Point]]
-    neighbors: t.Optional[t.List[Point]]
+    neighbors: t.Optional[t.List[t.Union[Point, 'Grid']]]
     parent_coords: Coords
     depth: int = 0
     radius: float = constants.INITIAL_RADIUS
@@ -119,17 +131,17 @@ class Grid:
         points: t.List[Point],
     ) -> 'Grid':
         lon, lat = coords
-        return cls(lon=lon, lat=lat, points=points, graph=None, hull=None,
+        return cls(lon=lon, lat=lat, points=points, graph=None,
                    neighbors=None, parent_coords=(lon, lat))
 
-    def quandrant_bearing(self, lon: float, lat: float) -> constants.Quadrant:
-        if lat >= self.lat:
-            if lon >= self.lon:
+    def bearing(self, other: 'Grid') -> constants.Quadrant:
+        if other.lat >= self.lat:
+            if other.lon >= self.lon:
                 return constants.Quadrant.Q_I
             else:
                 return constants.Quadrant.Q_II
         else:
-            if lon >= self.lon:
+            if other.lon >= self.lon:
                 return constants.Quadrant.Q_IV
             else:
                 return constants.Quadrant.Q_III
@@ -221,8 +233,8 @@ class Grid:
             radius=_radius, to_map=False, from_parent=from_parent)
         lon1, lon2 = sorted((lon1, lon2))
         lat1, lat2 = sorted((lat1, lat2))
-        lon_range = np.arange(lon1, lon2 + _radius, _radius).tolist()
-        lat_range = np.arange(lat1, lat2 + _radius, _radius).tolist()
+        lon_range = np.arange(lon1, lon2 + 0.5, 1.0).tolist()
+        lat_range = np.arange(lat1, lat2 + 0.5, 1.0).tolist()
         left = list(zip([lon_range[0]] * len(lat_range), lat_range))
         right = list(zip(lon_range[-1:] * len(lat_range), lat_range))
         top = list(zip(lon_range, [lat_range[0]] * len(lon_range)))
@@ -233,11 +245,13 @@ class Grid:
         self,
         radius: float,
         grids_by_parent: t.Dict[Coords, t.List['Grid']],
-    ):
+    ) -> t.List[t.List['Grid']]:
         result = []
         bounding_grid_coords = self.bounding_grids(radius, from_parent=True)
         for bgc in bounding_grid_coords:
-            result.extend(grids_by_parent.get(bgc, []))
+            found_entries = grids_by_parent.get(bgc, [])
+            if found_entries:
+                result.append(found_entries)
         return result
 
     def contains(self, coords: Coords) -> bool:
@@ -253,7 +267,7 @@ class Grid:
         point: Point,
         quadrants: t.Tuple[Coords, Coords, Coords, Coords],
     ):
-        bearing = self.quandrant_bearing(point.lon, point.lat)
+        bearing = self.bearing(point)
         return (quadrants[bearing], bearing), point
 
     def subdivide(
@@ -273,8 +287,7 @@ class Grid:
                                            key=itemgetter(0))
         new_contents = [Grid(lon, lat, list(map(itemgetter(1), points)),
                              radius=new_radius, depth=new_depth, graph=None,
-                             hull=None, neighbors=None,
-                             parent_coords=parent_coords)
+                             neighbors=None, parent_coords=parent_coords)
                         for ((lon, lat), bearing), points in grouped_points]
         results = []
         for c in new_contents:
@@ -290,31 +303,23 @@ class Grid:
         lon2, lat2 = lon + _radius, lat + _radius
         return (lon, lat), (lon1, lat1), (lon2, lat2)
 
-    def map(self) -> t.Tuple[t.Tuple[t.List[Coords], float], t.List[Coords],
-                             t.List[Segment], t.List[Segment]]:
-        internal, external = util.partition(
-            lambda edge: edge[2].get('external'), self.graph.edges(data=True))
+    def map(self) -> t.Tuple[LinearRing,
+                             t.List[LineString],
+                             t.List[Coords]]:
         return (
-            (self.bounds(), RADIUS),
-            [n.map_coords for n in self.graph.nodes()],
-            [[a.map_coords, b.map_coords] for a, b, _ in list(internal)],
-            [[a.map_coords, b.map_coords] for a, b, _ in list(external)],
-        )
-
-    def map_grid(self) -> t.Tuple[t.Tuple[t.List[Coords], float],
-                                  t.List[Coords]]:
-        return (
-            (self.bounds(), self.radius),
+            LinearRing(self.bounds()),
+            [LineString([self.points[0].coords, n.coords])
+             for n in self.neighbors],
             [p.map_coords for p in self.points],
         )
 
     def set_graph(self, graph: nx.Graph) -> 'Grid':
         return replace(self, graph=graph)
 
-    def set_hull(self, hull: t.Optional[t.List[Point]]) -> 'Grid':
-        return replace(self, hull=hull)
-
-    def set_neighbors(self, neighbors: t.Optional[t.List[Point]]) -> 'Grid':
+    def set_neighbors(
+        self,
+        neighbors: t.Optional[t.List[t.Union[Point, 'Grid']]]
+    ) -> 'Grid':
         return replace(self, neighbors=neighbors)
 
     def set_depth(self, depth: int) -> 'Grid':
